@@ -27,28 +27,14 @@ def Delta(t, s):  # need to test this
 
 
 def generate_Q_matrix(X, T):
-    # formula (14,16) Q[i,j,t] = q~_ij(t) * q_i(t)
     Q = np.zeros((len(X), len(X), len(T)))
-    # do it manuelly
+    nx = len(X)
     for t in range(len(T)):
         for x in range(len(X)):
-            for y in range(len(X)):
-                if y == x-1:  # from front
-                    Q[x, y, t] += Death_Reaction(X[x], T[t])
-                elif y == x+1:  # from behind
-                    Q[x, y, t] += Birth_Reaction(X[x], T[t])
-                elif x == y:
-                    Q[x, y, t] = 0
-                    '''
-                    if x == 0:
-                    Q[x,y,t] -=  Birth_Reaction(X[x],T[t])
-                    else:
-                    Q[x,y,t] -=  Birth_Reaction(X[x],T[t]) + Death_Reaction(X[x],T[t])
-                    '''
-
-        # Q[-1, :, t] = 0  # no outflow.
-
-    # Q[-1, -1, :] = 1  # boundary condition
+            if x - 1 >= 0:
+                Q[x, x-1, t] += Death_Reaction(X[x], T[t])
+            if x + 1 < nx:
+                Q[x, x+1, t] += Birth_Reaction(X[x], T[t])
     return Q
 
 
