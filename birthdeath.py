@@ -27,7 +27,7 @@ def Delta(t, s):  # need to test this
 
 
 def generate_Q_matrix(X, T):
-    """ Q[i,j,k] = q~_ij(t) * q_i(t) """
+    # formula (14,16) Q[i,j,t] = q~_ij(t) * q_i(t)
     Q = np.zeros((len(X), len(X), len(T)))
     # do it manuelly
     for t in range(len(T)):
@@ -46,10 +46,54 @@ def generate_Q_matrix(X, T):
                     Q[x,y,t] -=  Birth_Reaction(X[x],T[t]) + Death_Reaction(X[x],T[t])
                     '''
 
-        Q[-1, :, t] = 0  # no outflow.
+        # Q[-1, :, t] = 0  # no outflow.
 
-    Q[-1, -1, :] = 1  # boundary condition
+    # Q[-1, -1, :] = 1  # boundary condition
     return Q
+
+
+# new formulation
+# using veriable names as in https://arxiv.org/abs/2008.04624
+
+def generate_S(X, T):
+    """ S[i,s,t] = exp(- int_s^t q_i)  [eq. 24] """
+    S = np.zeros((len(X), len(T), len(T)))
+
+    for t in range(len(T)):
+        for s in range(t+1):
+            int_birth = Delta(T[t], T[s])
+            for i in range(len(X)):
+                int_death = delta*X[i]*(T[t]-T[s])
+                S[i, s, t] = np.exp(-(int_birth + int_death))
+
+    return S
+
+
+def jump(Q, S, p):
+    # based on formula (16)
+    # but using the trick that qt*qi is almost Q (except for diagonal and 0-rates)
+    return np.einsum('ijt, ist, is -> jt', Q, S, p)
+
+
+def test_doessame():
+    delta_t = 0.1
+
+    X = np.arange(0, 20, 1)
+    T = np.arange(0, 20, delta_t)
+
+    Q = generate_Q_matrix(X, T)
+    I, Tau = generate_I_and_Tau(X, T, delta_t)
+
+    S = generate_S(X, T)
+
+    p0 = np.zeros((len(X), len(T)))
+    p0[:, 0] = poisson.pmf(X, mu=10)
+
+    pp1 = propogate(Q, I, Tau, p0)
+    pp2 = jump(Q, S, p0)
+    pp3 = jump(Q, S*delta_t, p0)
+
+    assert np.isclose(pp1, pp3).all()
 
 
 def generate_I_and_Tau(X, T, delta_T):
@@ -58,12 +102,13 @@ def generate_I_and_Tau(X, T, delta_T):
 
     for x in range(len(X)):
         for t in range(len(T)):
-            for s in range(t+1):
+            for s in range(t+1):  # s <= t
+                # why do we index t,s and not s,t?
                 I[x, t, s] = np.exp(-delta*X[x]*(T[t]-T[s]))
                 if x == 0:
                     Tau[t, s] = np.exp(-Delta(T[t], T[s]))
 
-    return I*delta_T, Tau
+    return I*delta_T, Tau  # alex: why *delta_T?
 
 
 def propogate(Q, I, Tau, p_0):
@@ -75,15 +120,16 @@ def propogate(Q, I, Tau, p_0):
     return p_1
 
 
-if __name__ == '__main__':
 
-    delta_t = 0.1
+def test_run(nx=50, nt=40, delta_t=0.1):
 
-    X = np.arange(0, 50, 1)
-    T = np.arange(0, 40, delta_t)
+    X = np.arange(0, nx, 1)
+    T = np.arange(0, nt, delta_t)
 
     Q = generate_Q_matrix(X, T)
     I, Tau = generate_I_and_Tau(X, T, delta_t)
+
+    S = generate_S(X, T, rownormalize=True)
 
     p_0 = np.zeros((len(X), len(T)))
     p_0[:, 0] = poisson.pmf(X, mu=10)
@@ -103,17 +149,18 @@ if __name__ == '__main__':
 
     pl.ion()
 
+    pp = p_0
     for i in range(200):
 
-        p_0 = propogate(Q, I, Tau, p_0)
+        pp = jump(Q, S, pp)
 
         pl.clf()
         pl.title('step:' + str(i))
-        p_X_T += p_0
+        p_X_T += pp
 
-        print(np.sum(p_0))
+        print(np.sum(pp))
 
-        pl.imshow(p_0.T, origin='low', aspect='auto')
+        pl.imshow(pp.T, origin='lower', aspect='auto')
         #pl.imshow(p_X_T.T, origin = 'low', aspect = 'auto')
 
         pl.colorbar()
@@ -127,3 +174,7 @@ if __name__ == '__main__':
         pl.pause(0.1)
 
     pdb.set_trace()
+
+
+if __name__ == '__main__':
+    test_run()
