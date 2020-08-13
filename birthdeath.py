@@ -22,8 +22,15 @@ def Death_Reaction(x, t):
     return delta*x
 
 
-def Delta(t, s):  # need to test this
+def DeltaOld(t, s):  # need to test this
     return (L/K)*(np.log(1 + np.exp(K*(t-t_0))) - np.log(1+np.exp(K*(s-t_0)))) + C*(t-s)
+
+
+def Delta(t, s):
+    return (L/K)*(np.log((1 + np.exp(K*(t-t_0))) / (1+np.exp(K*(s-t_0))))) + C*(t-s)
+
+
+assert np.isclose(Delta(3, 2), DeltaOld(3, 2))
 
 
 def generate_Q_matrix(X, T):
@@ -46,7 +53,7 @@ class AugmentedJumpChain:
         self.k = jumpkernel_coll(self.qt, self.qi, self.S)
 
     def jump(self, p):
-        return np.einsum('ijst, is -> jt', self.k, p)
+        return np.einsum('isjt, is -> jt', self.k, p)
 
 
 def jumpkernel_coll(qt, qi, S):
@@ -55,8 +62,8 @@ def jumpkernel_coll(qt, qi, S):
     this is the collocation approach, i.e. take the density of k(i,s,j,t) as a
     transtion probability (i,s) -> (j,t).
     """
-    k = np.einsum('ijt, it, ist -> ijst', qt, qi, S)
-    k = k / k.sum(axis=(1, 3))[:, None, :, None]  # normalize density to probability
+    k = np.einsum('ijt, it, ist -> isjt', qt, qi, S)
+    k = k / k.sum(axis=(2, 3))[:, :, None, None]  # normalize density to probability
     return k
 
 
@@ -77,21 +84,37 @@ def qtilde(Q):
     return qt, qi
 
 
-# new formulation
-# using veriable names as in https://arxiv.org/abs/2008.04624
+def generate_S_Old(X, T):
+    """ S[i,s,t] = exp(- int_s^t q_i)  [eq. 24] """
+    S = np.zeros((len(X), len(T), len(T)))
+
+    for i in range(len(X)):
+        for t in range(len(T)):
+            for s in range(t+1):
+                int_birth = Delta(T[t], T[s])
+                int_death = delta*X[i]*(T[t]-T[s])
+                S[i, s, t] = np.exp(-(int_birth + int_death))
+    return S
+
 
 def generate_S(X, T):
     """ S[i,s,t] = exp(- int_s^t q_i)  [eq. 24] """
     S = np.zeros((len(X), len(T), len(T)))
+    s, t = np.meshgrid(T, T)
 
-    for t in range(len(T)):
-        for s in range(t+1):
-            int_birth = Delta(T[t], T[s])
-            for i in range(len(X)):
-                int_death = delta*X[i]*(T[t]-T[s])
-                S[i, s, t] = np.exp(-(int_birth + int_death))
+    birth = Delta(s, t)
+    S[None, :, :] = birth.T
+
+    death = s - t
+    death = delta * np.einsum('st, i -> ist', death, X)
+
+    S = np.exp(-(birth + death))
+    S = np.triu(S)
 
     return S
+
+
+assert np.allclose(generate_S_Old(range(10), range(10)), generate_S(range(10), range(10)))
 
 
 def jump(Q, S, p):
@@ -145,6 +168,16 @@ def propogate(Q, I, Tau, p_0):
     return p_1
 
 
+def test_chain(nx=50, nt=40, delta_t=.1):
+    X = np.arange(0, nx, 1)
+    T = np.arange(0, nt, delta_t)
+
+    Q = generate_Q_matrix(X, T)
+    S = generate_S(X, T)
+    jc = AugmentedJumpChain(Q, S)
+    return jc
+
+
 def test_run(nx=50, nt=40, delta_t=0.1):
 
     X = np.arange(0, nx, 1)
@@ -183,7 +216,7 @@ def test_run(nx=50, nt=40, delta_t=0.1):
         pl.clf()
         pl.title('step:' + str(i))
         pl.imshow(p.T, origin='lower', aspect='auto')
-        #pl.imshow(p_X_T.T, origin = 'low', aspect = 'auto')
+        # pl.imshow(p_X_T.T, origin = 'low', aspect = 'auto')
         inds = range(len(T))[::40]
         pl.yticks(inds, T[inds])
         pl.xlabel('X')
