@@ -52,6 +52,45 @@ def generate_Q_matrix(X, T):
     return Q
 
 
+class AugmentedJumpChain:
+    def __init__(self, Q, S):
+        self.Q = Q
+        self.qt, self.qi = qtilde(Q)
+        self.S = S
+        self.k = jumpkernel_coll(self.qt, self.qi, self.S)
+
+    def jump(self, p):
+        return np.einsum('ijst, is -> jt', self.k, p)
+
+
+def jumpkernel_coll(qt, qi, S):
+    """
+    compute the jumpkernel for given integrals S[i,s,t] = exp(-int_s^t q_i)
+    this is the collocation approach, i.e. take the density of k(i,s,j,t) as a
+    transtion probability (i,s) -> (j,t).
+    """
+    k = np.einsum('ijt, it, ist -> ijst', qt, qi, S)
+    k = k / k.sum(axis=(1, 3))[:, None, :, None]  # normalize density to probability
+    return k
+
+
+def qtilde(Q):
+    """ given a standard rate matrix returns:
+    qt[i,j,t] = q^tilde_ij(t) : the row normalized jump matrix [eq. 14]
+    qi[i,t] = q_i(t): the outflow rate [eq. 6]
+    """
+
+    qt = Q.copy()
+    n = qt.shape[0]
+    qt[range(n), range(n), :] = 0   # diagonal 0
+    qi = qt.sum(axis=1)             # rowsum
+    qt = qt / qi[:, None, :]        # normalize
+    z = np.where(qi == 0)           # special case q_i = 0 => q_ij = kron_ij
+    qt[z[0], :,    z[1]] = 0
+    qt[z[0], z[0], z[1]] = 1
+    return qt, qi
+
+
 # new formulation
 # using veriable names as in https://arxiv.org/abs/2008.04624
 
@@ -120,16 +159,14 @@ def propogate(Q, I, Tau, p_0):
     return p_1
 
 
-
 def test_run(nx=50, nt=40, delta_t=0.1):
 
     X = np.arange(0, nx, 1)
     T = np.arange(0, nt, delta_t)
 
     Q = generate_Q_matrix(X, T)
-    I, Tau = generate_I_and_Tau(X, T, delta_t)
-
-    S = generate_S(X, T, rownormalize=True)
+    S = generate_S(X, T)
+    jc = AugmentedJumpChain(Q, S)
 
     p_0 = np.zeros((len(X), len(T)))
     p_0[:, 0] = poisson.pmf(X, mu=10)
@@ -149,26 +186,23 @@ def test_run(nx=50, nt=40, delta_t=0.1):
 
     pl.ion()
 
-    pp = p_0
+    p = p_0
     for i in range(200):
 
-        pp = jump(Q, S, pp)
+        p = jc.jump(p)
+        p_X_T += p
+
+        print(np.sum(p))
 
         pl.clf()
         pl.title('step:' + str(i))
-        p_X_T += pp
-
-        print(np.sum(pp))
-
-        pl.imshow(pp.T, origin='lower', aspect='auto')
+        pl.imshow(p.T, origin='lower', aspect='auto')
         #pl.imshow(p_X_T.T, origin = 'low', aspect = 'auto')
-
-        pl.colorbar()
         inds = range(len(T))[::40]
-
         pl.yticks(inds, T[inds])
         pl.xlabel('X')
         pl.ylabel('Time')
+        pl.colorbar()
 
         pl.draw()
         pl.pause(0.1)
