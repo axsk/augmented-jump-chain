@@ -51,8 +51,14 @@ class AugmentedJumpChain:
         self.qt, self.qi = qtilde(Q)
         self.S = S
         self.k = jumpkernel_coll(self.qt, self.qi, self.S)
+        nxt = Q.shape[0] * Q.shape[2]
+        self.km = self.k.reshape(nxt, nxt).T
 
     def jump(self, p):
+        nx, nt = p.shape
+        return self.km.dot(p.reshape(nx*nt)).reshape(nx, nt)
+
+    def jump_old(self, p):
         return np.einsum('isjt, is -> jt', self.k, p)
 
 
