@@ -170,3 +170,45 @@ def run(p=BirthDeath(n_t=100, L=1), n_iter=200):
 if __name__ == '__main__':
     run()
     pdb.set_trace()
+
+
+from scipy.optimize import fsolve
+
+
+def temporal_gillespie(q_fun, int_fun, x0, t0, n_iter):
+    x = x0
+    t = t0
+    xs = [x]
+    ts = [t]
+    s = 1
+
+    while len(xs) < n_iter:
+        tau = np.random.exponential()
+        t = fsolve(lambda tt: int_fun(t, tt, x) - tau, tau/s)
+        q = q_fun(t)[x, :]
+        q[x] = 0
+        s = np.sum(q)
+        q = q / s
+        x = np.random.choice(range(len(q)), p=q)
+        xs.append(x)
+        ts.append(t)
+
+    return xs, ts
+
+
+def test_temporal_gillespie(n=10):
+    bd = BirthDeath(n_t=1)
+
+    def q_fun(t):
+        bd.T = [t]
+        bd.generate_Q()
+        return bd.Q[:, :, 0]
+
+    def int_fun(s, t, i):
+        return bd.Delta(t, s) + bd.delta * (t-s) * bd.X[i]
+
+    xs, ts = temporal_gillespie(q_fun, int_fun, 0, 0, n)
+    plt.plot(xs, ts)
+
+
+
