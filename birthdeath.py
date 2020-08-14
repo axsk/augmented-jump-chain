@@ -1,48 +1,72 @@
 import numpy as np
 import pdb
 import pylab as pl
+import matplotlib.pyplot as plt
 from scipy.stats import poisson
 
-# Params for the sigmoid activation
-C = 1.0
-L = 6.0
-K = -0.5
-t_0 = 15
 
+class BirthDeath:
 
-# param for death reaction
-delta = 0.1
+    def __init__(self, C=1.0, L=6.0, K=-.5, t_0=15, delta=.1, n_x=40, n_t=40, t_max=40, auto_gen=True):
+        self.C = C
+        self.L = L
+        self.K = K
+        self.t_0 = t_0
+        self.delta = delta  # death rate
+        self.delta_t = 0.1  # stepsize of time discretization
+        self.X = range(n_x)
+        self.T = np.linspace(0, t_max, n_t)
 
+        self.p_0 = np.zeros((n_x, n_t))
+        self.p_0[:, 0] = poisson.pmf(self.X, mu=10)
 
-def Birth_Reaction(x, t):
-    return C + np.divide(L, 1+np.exp(-K*(t-t_0)))
+        if auto_gen:
+            self.generate_Q()
+            self.generate_S()
+            self.generate_ajc()
 
+    def Birth_Reaction(self, x, t):
+        return self.C + np.divide(self.L, 1+np.exp(-self.K*(t-self.t_0)))
 
-def Death_Reaction(x, t):
-    return delta*x
+    def Death_Reaction(self, x, t):
+        return self.delta*x
 
+    def Delta(self, t, s):
+        # integral of the logistic birth function from s to t
+        return (self.L/self.K)*(np.log((1 + np.exp(self.K*(t-self.t_0))) / (1+np.exp(self.K*(s-self.t_0))))) + self.C*(t-s)
 
-def DeltaOld(t, s):  # need to test this
-    return (L/K)*(np.log(1 + np.exp(K*(t-t_0))) - np.log(1+np.exp(K*(s-t_0)))) + C*(t-s)
+    def generate_Q(self):
+        X, T = self.X, self.T
+        Q = np.zeros((len(X), len(X), len(T)))
+        nx = len(X)
+        for t in range(len(T)):
+            for x in range(len(X)):
+                if x - 1 >= 0:
+                    Q[x, x-1, t] += self.Death_Reaction(X[x], T[t])
+                if x + 1 < nx:
+                    Q[x, x+1, t] += self.Birth_Reaction(X[x], T[t])
+        self.Q = Q
 
+    def generate_S(self):
+        """ S[i,s,t] = exp(- int_s^t q_i)  [eq. 24] """
+        X, T = self.X, self.T
 
-def Delta(t, s):
-    return (L/K)*(np.log((1 + np.exp(K*(t-t_0))) / (1+np.exp(K*(s-t_0))))) + C*(t-s)
+        S = np.zeros((len(X), len(T), len(T)))
+        s, t = np.meshgrid(T, T)
 
+        birth = self.Delta(s, t)
+        S[None, :, :] = birth.T
 
-assert np.isclose(Delta(3, 2), DeltaOld(3, 2))
+        death = s - t
+        death = self.delta * np.einsum('st, i -> ist', death, X)
 
+        S = np.exp(-(birth + death))
+        S = np.triu(S)
 
-def generate_Q_matrix(X, T):
-    Q = np.zeros((len(X), len(X), len(T)))
-    nx = len(X)
-    for t in range(len(T)):
-        for x in range(len(X)):
-            if x - 1 >= 0:
-                Q[x, x-1, t] += Death_Reaction(X[x], T[t])
-            if x + 1 < nx:
-                Q[x, x+1, t] += Birth_Reaction(X[x], T[t])
-    return Q
+        self.S = S
+
+    def generate_ajc(self):
+        self.ajc = AugmentedJumpChain(self.Q, self.S)
 
 
 class AugmentedJumpChain:
@@ -55,11 +79,16 @@ class AugmentedJumpChain:
         self.km = self.k.reshape(nxt, nxt).T
 
     def jump(self, p):
+        return np.tensordot(self.k, p, ([0, 1], [0, 1]))  # sum over first two inds
+
+    def jump2(self, p):
         nx, nt = p.shape
         return self.km.dot(p.reshape(nx*nt)).reshape(nx, nt)
 
-    def jump_old(self, p):
+    def jump3(self, p):
         return np.einsum('isjt, is -> jt', self.k, p)
+
+    #def synchronize
 
 
 def jumpkernel_coll(qt, qi, S):
@@ -90,113 +119,15 @@ def qtilde(Q):
     return qt, qi
 
 
-def generate_S_Old(X, T):
-    """ S[i,s,t] = exp(- int_s^t q_i)  [eq. 24] """
-    S = np.zeros((len(X), len(T), len(T)))
-
-    for i in range(len(X)):
-        for t in range(len(T)):
-            for s in range(t+1):
-                int_birth = Delta(T[t], T[s])
-                int_death = delta*X[i]*(T[t]-T[s])
-                S[i, s, t] = np.exp(-(int_birth + int_death))
-    return S
+def test_singlejump():
+    p = BirthDeath()
+    p.ajc.jump(p.p_0)
 
 
-def generate_S(X, T):
-    """ S[i,s,t] = exp(- int_s^t q_i)  [eq. 24] """
-    S = np.zeros((len(X), len(T), len(T)))
-    s, t = np.meshgrid(T, T)
-
-    birth = Delta(s, t)
-    S[None, :, :] = birth.T
-
-    death = s - t
-    death = delta * np.einsum('st, i -> ist', death, X)
-
-    S = np.exp(-(birth + death))
-    S = np.triu(S)
-
-    return S
-
-
-assert np.allclose(generate_S_Old(range(10), range(10)), generate_S(range(10), range(10)))
-
-
-def jump(Q, S, p):
-    # based on formula (16)
-    # but using the trick that qt*qi is almost Q (except for diagonal and 0-rates)
-    return np.einsum('ijt, ist, is -> jt', Q, S, p)
-
-
-def test_doessame():
-    delta_t = 0.1
-
-    X = np.arange(0, 20, 1)
-    T = np.arange(0, 20, delta_t)
-
-    Q = generate_Q_matrix(X, T)
-    I, Tau = generate_I_and_Tau(X, T, delta_t)
-
-    S = generate_S(X, T)
-
-    p0 = np.zeros((len(X), len(T)))
-    p0[:, 0] = poisson.pmf(X, mu=10)
-
-    pp1 = propogate(Q, I, Tau, p0)
-    pp2 = jump(Q, S, p0)
-    pp3 = jump(Q, S*delta_t, p0)
-
-    assert np.isclose(pp1, pp3).all()
-
-
-def generate_I_and_Tau(X, T, delta_T):
-    I = np.zeros((len(X), len(T), len(T)))
-    Tau = np.zeros((len(T), len(T)))
-
-    for x in range(len(X)):
-        for t in range(len(T)):
-            for s in range(t+1):  # s <= t
-                # why do we index t,s and not s,t?
-                I[x, t, s] = np.exp(-delta*X[x]*(T[t]-T[s]))
-                if x == 0:
-                    Tau[t, s] = np.exp(-Delta(T[t], T[s]))
-
-    return I*delta_T, Tau  # alex: why *delta_T?
-
-
-def propogate(Q, I, Tau, p_0):
-
-    F = np.einsum('xts, ts, xs -> xt', I, Tau, p_0)
-
-    p_1 = np.einsum('xyt, xt -> yt', Q, F)
-
-    return p_1
-
-
-def test_chain(nx=50, nt=40, delta_t=.1):
-    X = np.arange(0, nx, 1)
-    T = np.arange(0, nt, delta_t)
-
-    Q = generate_Q_matrix(X, T)
-    S = generate_S(X, T)
-    jc = AugmentedJumpChain(Q, S)
-    return jc
-
-
-def test_run(nx=50, nt=40, delta_t=0.1):
-
-    X = np.arange(0, nx, 1)
-    T = np.arange(0, nt, delta_t)
-
-    Q = generate_Q_matrix(X, T)
-    S = generate_S(X, T)
-    jc = AugmentedJumpChain(Q, S)
-
-    p_0 = np.zeros((len(X), len(T)))
-    p_0[:, 0] = poisson.pmf(X, mu=10)
-
-    p_X_T = p_0.copy()
+def run(p=BirthDeath(n_t=100, L=1), n_iter=200):
+    x = p.p_0
+    xs = [x]
+    # p_X_T = p_0.copy()
 
     '''
     p_1 = propogate(Q,I,Tau,p_0)
@@ -211,29 +142,31 @@ def test_run(nx=50, nt=40, delta_t=0.1):
 
     pl.ion()
 
-    p = p_0
-    for i in range(200):
+    # p = p_0
+    for i in range(n_iter):
 
-        p = jc.jump(p)
-        p_X_T += p
+        x = p.ajc.jump(x)
+        xs.append(x)
+        # p_X_T += p
 
-        print(np.sum(p))
+        print(np.sum(x))
 
         pl.clf()
         pl.title('step:' + str(i))
-        pl.imshow(p.T, origin='lower', aspect='auto')
+        pl.imshow(x.T, origin='lower', aspect='auto')
         # pl.imshow(p_X_T.T, origin = 'low', aspect = 'auto')
-        inds = range(len(T))[::40]
-        pl.yticks(inds, T[inds])
+        # inds = range(len(T))[::40]
+        # pl.yticks(inds, T[inds])
         pl.xlabel('X')
         pl.ylabel('Time')
         pl.colorbar()
 
         pl.draw()
-        pl.pause(0.1)
+        pl.pause(0.01)
 
-    pdb.set_trace()
+    return xs
 
 
 if __name__ == '__main__':
-    test_run()
+    run()
+    pdb.set_trace()
