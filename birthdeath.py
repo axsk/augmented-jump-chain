@@ -3,11 +3,12 @@ import pdb
 import pylab as pl
 import matplotlib.pyplot as plt
 from scipy.stats import poisson
+import copy
 
 
 class BirthDeath:
 
-    def __init__(self, C=1.0, L=6.0, K=-.5, t_0=15, delta=.1, n_x=40, n_t=40, t_max=40, auto_gen=True):
+    def __init__(self, C=1.0, L=1.0, K=-.5, t_0=15, delta=.1, n_x=40, n_t=100, t_max=40, auto_gen=True):
         self.C = C
         self.L = L
         self.K = K
@@ -17,8 +18,8 @@ class BirthDeath:
         self.X = range(n_x)
         self.T = np.linspace(0, t_max, n_t)
 
-        self.p_0 = np.zeros((n_x, n_t))
-        self.p_0[:, 0] = poisson.pmf(self.X, mu=10)
+        self.p0 = np.zeros((n_x, n_t))
+        self.p0[:, 0] = poisson.pmf(self.X, mu=10)
 
         if auto_gen:
             self.generate_Q()
@@ -67,6 +68,20 @@ class BirthDeath:
 
     def generate_ajc(self):
         self.ajc = AugmentedJumpChain(self.Q, self.S)
+
+    def gillespie(self, x0, t0, n):
+        bd = copy.copy(self)
+
+        def q_fun(t):
+            bd.T = [t]
+            bd.generate_Q()
+            return bd.Q[:, :, 0]
+
+        def int_fun(s, t, i):
+            return (bd.Delta(t, s) + bd.delta * (t-s) * bd.X[i])
+
+        xs, ts = temporal_gillespie(q_fun, int_fun, x0, t0, n)
+        return xs, ts
 
 
 class AugmentedJumpChain:
@@ -119,63 +134,23 @@ def qtilde(Q):
     return qt, qi
 
 
-def test_singlejump():
-    p = BirthDeath()
-    p.ajc.jump(p.p_0)
+def my_imshow(x, t_max=40, x_max=40):
+    plt.imshow(x, origin='lower', aspect='auto', extent=[0, t_max, 0, x_max])
+    plt.xlabel('T')
+    plt.ylabel('X')
+    #plt.colorbar()
 
 
-def run(p=BirthDeath(n_t=100, L=1), n_iter=200):
-    x = p.p_0
-    xs = [x]
-    # p_X_T = p_0.copy()
-
-    '''
-    p_1 = propogate(Q,I,Tau,p_0)
-    pl.subplot(1,2,1)
-    pl.imshow(p_0, origin = 'low', aspect = 'auto')
-    pl.colorbar()
-    pl.subplot(1,2,2)
-    pl.imshow(p_1, origin = 'low', aspect = 'auto')
-    pl.colorbar()
-    pl.show()
-    '''
-
-    pl.ion()
-
-    # p = p_0
-    for i in range(n_iter):
-
-        x = p.ajc.jump(x)
-        xs.append(x)
-        # p_X_T += p
-
-        print(np.sum(x))
-
-        pl.clf()
-        pl.title('step:' + str(i))
-        pl.imshow(x.T, origin='lower', aspect='auto')
-        # pl.imshow(p_X_T.T, origin = 'low', aspect = 'auto')
-        # inds = range(len(T))[::40]
-        # pl.yticks(inds, T[inds])
-        pl.xlabel('X')
-        pl.ylabel('Time')
-        pl.colorbar()
-
-        pl.draw()
-        pl.pause(0.01)
-
-    return xs
-
-
-if __name__ == '__main__':
-    run()
-    pdb.set_trace()
-
+def plot_activity(xs):
+    xsum = np.sum(xs, axis=0)
+    print(np.argmax(np.sum(xsum, axis=1)))
+    my_imshow(xsum)
 
 from scipy.optimize import fsolve
 
 
 def temporal_gillespie(q_fun, int_fun, x0, t0, n_iter):
+    """ gillespie algorithm for nonaut. processes """
     x = x0
     t = t0
     xs = [x]
@@ -184,7 +159,7 @@ def temporal_gillespie(q_fun, int_fun, x0, t0, n_iter):
 
     while len(xs) < n_iter:
         tau = np.random.exponential()
-        t = fsolve(lambda tt: int_fun(t, tt, x) - tau, tau/s)
+        t = fsolve(lambda tt: int_fun(t, tt, x) - tau, tau/s)[0]
         q = q_fun(t)[x, :]
         q[x] = 0
         s = np.sum(q)
@@ -196,19 +171,42 @@ def temporal_gillespie(q_fun, int_fun, x0, t0, n_iter):
     return xs, ts
 
 
-def test_temporal_gillespie(n=10):
-    bd = BirthDeath(n_t=1)
+def run(p=BirthDeath(), n_jumps=100, n_gillespie=100):
+    """ the experiment """
+    x = p.p0
+    xs = [x]
 
-    def q_fun(t):
-        bd.T = [t]
-        bd.generate_Q()
-        return bd.Q[:, :, 0]
+    gxs = np.zeros((n_gillespie, n_jumps))
+    gts = np.zeros((n_gillespie, n_jumps))
 
-    def int_fun(s, t, i):
-        return bd.Delta(t, s) + bd.delta * (t-s) * bd.X[i]
+    for i in range(n_gillespie):
+        x0 = np.random.choice(range(len(p.X)), p=p.p0[:, 0])
+        gxs[i, :], gts[i, :] = p.gillespie(x0, 0, n_jumps)
+        plt.plot(gts, gxs)
 
-    xs, ts = temporal_gillespie(q_fun, int_fun, 0, 0, n)
-    plt.plot(xs, ts)
+    pl.ion()
+
+    for i in range(n_jumps):
+
+        x = p.ajc.jump(x)
+        xs.append(x)
+
+        pl.clf()
+        pl.title('step:' + str(i))
+        my_imshow(x)
+        x0 = np.random.choice(range(len(p.X)), p=p.p0[:, 0])
+        plt.scatter(gts[:, i], gxs[:, i])
+
+        pl.draw()
+        pl.pause(0.01)
+
+    plt.figure()
+    plot_activity(xs)
+    plt.plot(gts.T, gxs.T, alpha=.1, color="white")
+
+    return locals()
 
 
-
+if __name__ == '__main__':
+    r = run()
+    pdb.set_trace()
