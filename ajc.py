@@ -14,8 +14,21 @@ class AJC:
     def jump3(self, p):
         return np.einsum('isjt, is -> jt', self.k, p)
 
-    # def synchronize
-    # def koop
+    def geiger(self, p, n=100):
+        g = np.copy(p)
+        pp = p
+        for i in range(n):
+            pp = self.jump(pp)
+            g = g + pp
+        return g
+
+    def synchronize(self, g):
+        S = self.k.sum(axis=2)  # sum over target points
+        S = 1 - np.cumsum(S, axis=2)  # cumsum to get prob to jump in interval
+        S = np.triu(S)
+        return np.einsum('ist, is -> it', S, g)
+
+
 
 def qtilde(Q):
     """ given a standard rate matrix returns:
@@ -33,11 +46,32 @@ def qtilde(Q):
     qt[z[0], z[0], z[1]] = 1
     return qt, qi
 
+
 def kernel_to_matrix(k):
     """ given k[i,s,j,t] return the row-stochastic, space-major
     transition matrix M """
     nxt = np.shape(k)[0] * np.shape(k)[1]
     return k.T.reshape(nxt, nxt).T
+
+
+def holding_probs(qi, dt):
+    """ compute the holding probabilities from outbound rates assuming
+    they are constant along the time intervals.
+    input: qi[x,s]:   outbound rate at (x,s),
+        dt[s]:     length of timeintervals :math:`\\Delta T_s``$
+    output: S[x,s,t]: probability to stay in x from s to t
+    """
+    nt = len(dt)
+    assert np.size(qi, 1) == nt
+
+    dts = np.zeros((nt, nt))
+    for i in range(nt):
+        dts[i, i:] = np.cumsum(dt[i:])
+
+    # S[i,s,t] = exp(-(t-s) * qi[s])
+    S = np.exp(-np.einsum('xs, st -> xst', qi, dts))
+    S = np.triu(S)
+    return S
 
 
 class AJCGalerkin(AJC):
@@ -71,28 +105,8 @@ class AJCCollocation(AJC):
         self.Q = Q
         self.qt, self.qi = qtilde(Q)
         self.S = S
-        self.k = jumpkernel_coll(self.qt, self.qi, self.S)
+        self.k = self.jumpkernel(self.qt, self.qi, self.S)
         self.km = kernel_to_matrix(self.k)
-
-    @staticmethod
-    def holding_probs(qi, dt):
-        """ compute the holding probabilities from outbound rates assuming
-        they are constant along the time intervals.
-        input: qi[x,s]:   outbound rate at (x,s),
-            dt[s]:     length of timeintervals :math:`\\Delta T_s``$
-        output: S[x,s,t]: probability to stay in x from s to t
-        """
-        nt = len(dt)
-        assert np.size(qi, 1) == nt
-
-        dts = np.zeros((nt, nt))
-        for i in range(nt):
-            dts[i, i:] = np.cumsum(dt[i:])
-
-        # S[i,s,t] = exp(-(t-s) * qi[s])
-        S = np.exp(-np.einsum('xs, st -> xst', qi, dts))
-        S = np.triu(S)
-        return S
 
     @staticmethod
     def jumpkernel(qt, qi, S):
@@ -104,11 +118,3 @@ class AJCCollocation(AJC):
         k = np.einsum('ijt, it, ist -> isjt', qt, qi, S)
         k = k / k.sum(axis=(2, 3))[:, :, None, None]  # normalize density to probability
         return k
-
-
-
-
-
-
-
-
