@@ -1,5 +1,4 @@
 import numpy as np
-from numpy.core.numeric import identity
 
 
 class AJC:
@@ -54,6 +53,24 @@ class AJC:
         q[inds_bnd] = g
 
         return q
+
+    def koopman_commitor(self):
+        " old variant with commitor set after the modeled time domain "
+        nx, nxt = self.nx, self.nxt
+        A_inner = self.km - np.identity(nxt)
+        s = np.sum(self.km, axis=1)
+
+        A = np.pad(A_inner, ((0, nx),(0, nx)))
+        A[nxt:, nxt:] = np.identity(nx)
+
+        for i in range(nxt):
+            A[i, nxt + np.mod(i,nx)] = 1 - s[i]
+
+        b = np.zeros((nxt+nx, nx))
+        b[nxt:, :] = np.identity(nx)
+
+        return np.linalg.solve(A, b)
+
 
     def finite_time_hitting_prob(self, n_state):
         """ Compute the probability to hit a given state n_state over the
@@ -139,6 +156,9 @@ def holding_probs(qi, dt):
 
 class AJCGalerkin(AJC):
     def __init__(self, Q, dt):
+        self.nx = np.size(Q, axis=0)
+        self.nt = len(dt)
+        self.nxt = self.nx * self.nt
         self.Q = Q
         self.dt = dt
         self.qt, self.qi = qtilde(Q)
