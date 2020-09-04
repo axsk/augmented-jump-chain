@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.core.numeric import identity
 
 
 class AJC:
@@ -22,12 +23,74 @@ class AJC:
             g = g + pp
         return g
 
-    def synchronize(self, g):
+    def holding_probs(self):
         S = self.k.sum(axis=2)  # sum over target points
         S = 1 - np.cumsum(S, axis=2)  # cumsum to get prob to jump in interval
         S = np.triu(S)
+        return S
+
+    def synchronize(self, g):
+        S = self.holding_probs()
         return np.einsum('ist, is -> it', S, g)
 
+    def commitor(self, g, inds_bnd: 'np.ndarray[bool]'):
+
+        km = self.km
+        inds_inner = ~inds_bnd
+
+        km_ii = km[np.ix_(inds_inner, inds_inner)]  # inner
+        km_ib = km[np.ix_(inds_inner, inds_bnd)]  # boundary
+
+        ni = np.size(km_ii, 0)
+        inv = np.linalg.inv(np.identity(ni) - km_ii)
+
+        S = self.holding_probs()
+        Sg = np.einsum('is, i -> is', S[:, :, -2], g).T.flatten()[inds_inner]
+
+        q_i = inv.dot(km_ib.dot(g) + Sg)
+
+        q = np.zeros(self.km.shape[0])
+        q[inds_inner] = q_i
+        q[inds_bnd] = g
+
+        return q
+
+    def finite_time_hitting_prob(self, n_state):
+        """ Compute the probability to hit a given state n_state over the
+        time horizon of the jump chain from any space-time point by solving
+        Kp = p in C, p=1 in C'
+        where C' is the time-fibre of n_state and C the rest """
+        nx, nt = self.k.shape[0:2]
+        km = self.km
+
+        # Kp - p = 0 in C
+        M = km - np.identity(nx*nt)
+        b = np.zeros(nx*nt)
+
+        # p = 1 in C'
+        for i in range(nt):
+            st = i*nx + n_state  # spacetime index for state n_state at time i
+            M[st, :] = 0
+            M[st, st] = 1
+            b[st] = 1
+
+        p = np.linalg.inv(M).dot(b)
+        return p
+
+
+
+
+
+    def unflatten(self, x, dims=None):
+        if dims is None:
+            dims = self.k.shape[0:2]
+
+        if len(x) == np.prod(dims):
+            return np.reshape(x, np.flip(dims)).T
+        elif len(x) == np.prod(dims)**2:
+            return kernel_to_matrix(x)
+        else:
+            raise Exception()
 
 
 def qtilde(Q):

@@ -84,54 +84,7 @@ class BirthDeath:
         return xs, ts
 
 
-class AugmentedJumpChain:
-    def __init__(self, Q, S):
-        self.Q = Q
-        self.qt, self.qi = qtilde(Q)
-        self.S = S
-        self.k = jumpkernel_coll(self.qt, self.qi, self.S)
-        nxt = Q.shape[0] * Q.shape[2]
-        self.km = self.k.reshape(nxt, nxt).T
 
-    def jump(self, p):
-        return np.tensordot(self.k, p, ([0, 1], [0, 1]))  # sum over first two inds
-
-    def jump2(self, p):
-        nx, nt = p.shape
-        return self.km.dot(p.reshape(nx*nt)).reshape(nx, nt)
-
-    def jump3(self, p):
-        return np.einsum('isjt, is -> jt', self.k, p)
-
-    #def synchronize
-
-
-def jumpkernel_coll(qt, qi, S):
-    """
-    compute the jumpkernel for given integrals S[i,s,t] = exp(-int_s^t q_i)
-    this is the collocation approach, i.e. take the density of k(i,s,j,t) as a
-    transtion probability (i,s) -> (j,t).
-    """
-    k = np.einsum('ijt, it, ist -> isjt', qt, qi, S)
-    k = k / k.sum(axis=(2, 3))[:, :, None, None]  # normalize density to probability
-    return k
-
-
-def qtilde(Q):
-    """ given a standard rate matrix returns:
-    qt[i,j,t] = q^tilde_ij(t) : the row normalized jump matrix [eq. 14]
-    qi[i,t] = q_i(t): the outflow rate [eq. 6]
-    """
-
-    qt = Q.copy()
-    n = qt.shape[0]
-    qt[range(n), range(n), :] = 0   # diagonal 0
-    qi = qt.sum(axis=1)             # rowsum
-    qt = qt / qi[:, None, :]        # normalize
-    z = np.where(qi == 0)           # special case q_i = 0 => q_ij = kron_ij
-    qt[z[0], :,    z[1]] = 0
-    qt[z[0], z[0], z[1]] = 1
-    return qt, qi
 
 
 def my_imshow(x, t_max=40, x_max=40):
