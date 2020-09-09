@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import expm
 
 
 class AJC:
@@ -32,7 +33,7 @@ class AJC:
         S = self.holding_probs()
         return np.einsum('ist, is -> it', S, g)
 
-    def commitor(self, g, inds_bnd: 'np.ndarray[bool]'):
+    def _koopman_committor_single(self, g):
         """ compute the space-time committor 'q' where inds_bnd is a
         flattened space-time bool array indicating whether the cell belongs
         to the boundary, such that
@@ -45,6 +46,9 @@ class AJC:
         """
 
         km = self.km
+        nx, nt = self.nx, self.nt
+        inds_bnd = np.zeros(nx*nt, dtype=bool)
+        inds_bnd[-nx:] = True
         inds_inner = ~inds_bnd
 
         km_ii = km[np.ix_(inds_inner, inds_inner)]  # inner matrix
@@ -56,8 +60,6 @@ class AJC:
         S = self.holding_probs()
         # Sg = S|i,b * g
         # with the implicit assumption that inds_bnd is the last time slice
-        # S[i,s,-2] is the probability to stay in i from s up to
-        #   (including) the pre-last time, i.e. up to the last time (?)
         # we transpose to get space-major indexing
         # flatten and select the inner part
         Sg = np.einsum('is, i -> is', S[:, :, -1], g).T.flatten()[inds_inner]
@@ -71,7 +73,18 @@ class AJC:
 
         return q
 
-    def koopman_commitor(self):
+    def koopman_committor(self):
+        nx = self.nx
+        K = np.zeros((nx, nx))
+        for i in range(nx):
+            g = np.zeros(nx)
+            g[i] = 1
+            c = self.unflatten(self._koopman_committor_single(g))
+            K[:,i] = c[:,0]
+
+        return K
+
+    def koopman_augmented(self):
         " old variant with commitor set after the modeled time domain "
         nx, nxt = self.nx, self.nxt
         A_inner = self.km - np.identity(nxt)
@@ -86,7 +99,16 @@ class AJC:
         b = np.zeros((nxt+nx, nx))
         b[nxt:, :] = np.identity(nx)
 
-        return np.linalg.solve(A, b)
+        q = np.linalg.solve(A, b) 
+        K = q[:nx, :nx]
+        return K
+
+    
+    def koopman_exp(self):
+        K = np.identity(self.nx)
+        for i in range(self.nt):
+            K = K.dot(expm(self.Q[:,:,i]*self.dt[i]))
+        return K
 
 
     def finite_time_hitting_prob(self, n_state):
