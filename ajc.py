@@ -33,20 +33,37 @@ class AJC:
         return np.einsum('ist, is -> it', S, g)
 
     def commitor(self, g, inds_bnd: 'np.ndarray[bool]'):
+        """ compute the space-time committor 'q' where inds_bnd is a
+        flattened space-time bool array indicating whether the cell belongs
+        to the boundary, such that
+        q[inds_bnd] = g
+
+        uses the formula
+        q|c = (I - K|i,i)^-1 (K|i,b + S|i,b)g
+        where K|i,b denotes the restriction of the matrix k
+        onto the cells from i (interior) to b (boundary)
+        """
 
         km = self.km
         inds_inner = ~inds_bnd
 
-        km_ii = km[np.ix_(inds_inner, inds_inner)]  # inner
-        km_ib = km[np.ix_(inds_inner, inds_bnd)]  # boundary
+        km_ii = km[np.ix_(inds_inner, inds_inner)]  # inner matrix
+        km_ib = km[np.ix_(inds_inner, inds_bnd)]  # boundary matrix
 
         ni = np.size(km_ii, 0)
         inv = np.linalg.inv(np.identity(ni) - km_ii)
 
         S = self.holding_probs()
-        Sg = np.einsum('is, i -> is', S[:, :, -2], g).T.flatten()[inds_inner]
+        # Sg = S|i,b * g
+        # with the implicit assumption that inds_bnd is the last time slice
+        # S[i,s,-2] is the probability to stay in i from s up to
+        #   (including) the pre-last time, i.e. up to the last time (?)
+        # we transpose to get space-major indexing
+        # flatten and select the inner part
+        Sg = np.einsum('is, i -> is', S[:, :, -1], g).T.flatten()[inds_inner]
+        Kg = km_ib.dot(g)
 
-        q_i = inv.dot(km_ib.dot(g) + Sg)
+        q_i = inv.dot(Kg + Sg)
 
         q = np.zeros(self.km.shape[0])
         q[inds_inner] = q_i
