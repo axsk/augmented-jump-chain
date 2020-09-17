@@ -54,7 +54,7 @@ class SqraOptim:
         #plt.figure(figsize=(8,12))
         #ax1 = plt.subplot(3,1,1)
         im = ax[0].imshow(o.hist_x.T, aspect='auto', interpolation='nearest')
-        ax[0].set_title("potential history")
+        ax[0].set_title("perturbation history")
         plt.colorbar(im, ax=ax[0])
         
         ax[1].plot(o.hist_o)
