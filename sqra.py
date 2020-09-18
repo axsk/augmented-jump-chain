@@ -39,38 +39,37 @@ import matplotlib.pyplot as plt
 
 class sqra2d:
     """ square root approximation on a regular 2d grid """
-    def __init__(self, potential, x=(-2,2,5), y=(-2,2,5), beta=1, phi=1):
-        nx, ny = x[-1], y[-1]
+    def __init__(self, potential, beta=1, phi=1):
+        self.ny, self.nx = np.shape(potential)
         self.beta=beta
         self.phi=phi
-
-        us, vs = self.grid(x,y)
-        self.u = potential(us, vs)
-        self.A = adjacency2d(nx, ny)
+        self.u = potential
+        self.A = adjacency2d(self.nx, self.ny)
         self.Q = sqra(self.u.flatten(), self.A, self.beta, self.phi)
     
     def perturbed(self, v):
         """ compute the resulting sqra for a perturbation of the original potential"""
         return sqra(self.u.flatten() + v.flatten(), self.A, self.beta, self.phi)
 
-    @staticmethod
-    def grid(x, y):
-        xs = np.linspace(*x)
-        ys = np.linspace(*y)
-        return np.meshgrid(xs, ys, sparse=True)
-
     def plot(self):
-        plt.title("potential")
+        plt.title("SQRA potential")
         plt.imshow(self.u)
         plt.figure()
-        plt.title("stationary generator")
+        plt.title("SQRA generator")
         plt.imshow(self.Q.toarray())
         plt.colorbar()
 
     
-def doublewell2d(x, y):
+def doublewell2d(nx = 5, ny = 3, xlims=(-1.5,1.5), ylims=(-1.5,1.5)):
     """ evaluation of the 2d double well potential """
-    return (x**2-1)**2 + y**2
+    xs = np.linspace(*xlims, nx)
+    ys = np.linspace(*ylims, ny) 
+    xs, ys = np.meshgrid(xs, ys, sparse=True)
+
+    return (xs**2-1)**2 + ys**2
+
+def test_doublewell2d():
+    assert doublewell2d().shape == (3,5)
 
 def sqra(u, A, beta, phi):
     """ Square-root approximation of the generator
