@@ -39,7 +39,9 @@ class SqraOptim:
     def objective(self, x):
         self.perturb(x)
 
-        o = - np.min(self.j.finite_time_hitting_probs())
+        hp = self.j.finite_time_hitting_probs()
+        hp = hp[hp.nonzero()]
+        o = - np.min(hp)
         o += np.sum(abs(x)) * self.penalty
 
         self.iters += 1 
