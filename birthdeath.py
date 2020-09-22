@@ -99,30 +99,6 @@ def plot_activity(xs):
     print(np.argmax(np.sum(xsum, axis=1)))
     my_imshow(xsum)
 
-from scipy.optimize import fsolve
-
-
-def temporal_gillespie(q_fun, int_fun, x0, t0, n_iter):
-    """ gillespie algorithm for nonaut. processes """
-    x = x0
-    t = t0
-    xs = [x]
-    ts = [t]
-    s = 1
-
-    while len(xs) < n_iter:
-        tau = np.random.exponential()
-        t = fsolve(lambda tt: int_fun(t, tt, x) - tau, tau/s)[0]
-        q = q_fun(t)[x, :]
-        q[x] = 0
-        s = np.sum(q)
-        q = q / s
-        x = np.random.choice(range(len(q)), p=q)
-        xs.append(x)
-        ts.append(t)
-
-    return xs, ts
-
 
 def run(p=BirthDeath(), n_jumps=100, n_gillespie=100):
     """ the experiment """

@@ -2,6 +2,7 @@ from ajcs import AJCS
 import numpy as np
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+import ode
 
 class SqraOptim:
     def __init__(self, sqra, ts, adaptive = False, x0 = None, penalty=1):
@@ -39,7 +40,8 @@ class SqraOptim:
     def objective(self, x):
         self.perturb(x)
 
-        hp = self.j.finite_time_hitting_probs()
+        #hp = self.j.finite_time_hitting_probs()
+        hp = ode.finite_time_hitting_probs(self.j.Q, self.j.dt)
         hp = hp[hp.nonzero()]
         o = - np.min(hp)
         o += np.sum(abs(x)) * self.penalty
@@ -96,7 +98,7 @@ class SqraOptimNonaut(SqraOptim):
         j = self.j
         xts = np.reshape(x, (j.nt, j.nx))
         j.Q = [self.sqra.perturbed(xt) for xt in xts] 
-        j.compute()
+        #j.compute()
     
     def plot_initial_optimal_potential(self, ax):
         # ax.set_title("initial and optimal potential")
@@ -131,6 +133,13 @@ def scatter_3d_array(x):
         z[l,4] = val
     
     return px.scatter_3d(z, x=0, y=1, z=2, size=3, color=4,  labels = {'0':'t', '1':'y', '2':'x'})
+
+import plotly.graph_objects as go
+
+def stack_3darray(x):
+    return go.Figure(data=[go.Surface(z = z) for z in x])
+    
+
 
 
 def penaltyheuristic(sqra):
