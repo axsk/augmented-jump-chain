@@ -46,6 +46,7 @@ class sqra2d:
         self.u = potential
         self.A = adjacency2d(self.nx, self.ny)
         self.Q = sqra(self.u.flatten(), self.A, self.beta, self.phi)
+        self.N = self.Q.shape[0]
     
     def perturbed(self, v):
         """ compute the resulting sqra for a perturbation of the original potential"""

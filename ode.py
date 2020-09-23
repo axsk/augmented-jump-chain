@@ -14,11 +14,10 @@ q(0,x) is the probability to hit set A in the finite timespan [0,T]
 from scipy.integrate import odeint
 import numpy as np
 
-def finite_time_hitting_prob(Qs, dts, a):
+def finite_time_hitting_prob(Qs, dts, a, tol = 1e-2):
     """ fhtp for state a """
 
     nx = Qs[0].shape[0]
-    nt = len(Qs)
     x0 = np.zeros(nx)
     x0[a] = 1
 
@@ -31,11 +30,12 @@ def finite_time_hitting_prob(Qs, dts, a):
         ti = timeindex(ts[-1] - t)
         d = Qs[ti].dot(x)
         d[a] = 0
+        d = np.nan_to_num(d)  # if the generator contains infinite rates, the matrix product results in inf-inf = nan
         return d
 
-    return odeint(dq, x0, np.append([0], ts))
+    return odeint(dq, x0, np.append([0], ts), rtol=tol, atol=tol)
 
-def finite_time_hitting_probs(Qs, dts):
+def finite_time_hitting_probs(Qs, dts) -> np.ndarray:
     """ returns H[i,j] which is the fin. time hitting prob. to hit state i starting from j"""
     nx = Qs[0].shape[0]
     hps = np.array([finite_time_hitting_prob(Qs, dts, i)[-1,:] for i in range(nx)])
