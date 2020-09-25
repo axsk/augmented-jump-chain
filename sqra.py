@@ -36,6 +36,7 @@ def adjacency2d(nx, ny):
     return Q# - sp.diags(rowsum)
 
 import matplotlib.pyplot as plt
+from copy import copy
 
 class sqra2d:
     """ square root approximation on a regular 2d grid """
@@ -48,9 +49,15 @@ class sqra2d:
         self.Q = sqra(self.u.flatten(), self.A, self.beta, self.phi)
         self.N = self.Q.shape[0]
     
-    def perturbed(self, v):
+    def perturbed_Q(self, v):
         """ compute the resulting sqra for a perturbation of the original potential"""
         return sqra(self.u.flatten() + v.flatten(), self.A, self.beta, self.phi)
+
+    def perturbed_copy(self, v):
+        s = copy(self)
+        s.u = self.u + np.reshape(v, self.u.shape)
+        s.Q = self.perturbed_Q(v)
+        return s
 
     def plot(self):
         plt.title("SQRA potential")

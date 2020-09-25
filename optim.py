@@ -35,6 +35,7 @@ class SqraOptim:
 
         res = minimize(obj, x0=self.x, method='nelder-mead', options={'maxiter': iters, 'adaptive': self.adaptive, 'initial_simplex':self.simplex})
         self.simplex = res.final_simplex[0]
+        self.x = res.x
         obj(res.x)
         return res
 
@@ -55,12 +56,11 @@ class SqraOptim:
     ### Objective
 
     def objective(self, x):
-        hp = self.finite_time_hitting_probs(x) 
+        hp = self.finite_time_hitting_probs(x)
         hp = hp[hp.nonzero()]  # ignore fields which are not hit at all (infinity potential)
-        hp = hp[~np.isnan(hp)]
         return -np.min(hp)     # maximze the minimal hitting prob
 
-    def finite_time_hitting_probs(self, x):
+    def finite_time_hitting_probs(self, x) -> np.ndarray:
         Qs = self.perturbed_Qs(x)
         hp = ode.finite_time_hitting_probs(Qs, self.dts) # we worked with the ajc before, but this is faster
         return hp
