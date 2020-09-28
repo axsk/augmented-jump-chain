@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 from scipy.stats import poisson
 import copy
 
+import ajc
+import gillespie
+
 
 class BirthDeath:
 
@@ -67,7 +70,7 @@ class BirthDeath:
         self.S = S
 
     def generate_ajc(self):
-        self.ajc = AugmentedJumpChain(self.Q, self.S)
+        self.ajc = ajc.AJCCollocation(self.Q, self.S)
 
     def gillespie(self, x0, t0, n):
         bd = copy.copy(self)
@@ -80,7 +83,7 @@ class BirthDeath:
         def int_fun(s, t, i):
             return (bd.Delta(t, s) + bd.delta * (t-s) * bd.X[i])
 
-        xs, ts = temporal_gillespie(q_fun, int_fun, x0, t0, n)
+        xs, ts = gillespie.temporal_gillespie(q_fun, int_fun, x0, t0, n)
         return xs, ts
 
 
@@ -96,7 +99,7 @@ def my_imshow(x, t_max=40, x_max=40):
 
 def plot_activity(xs):
     xsum = np.sum(xs, axis=0)
-    print(np.argmax(np.sum(xsum, axis=1)))
+    #print(np.argmax(np.sum(xsum, axis=1)))
     my_imshow(xsum)
 
 
@@ -117,7 +120,7 @@ def run(p=BirthDeath(), n_jumps=100, n_gillespie=100):
 
     for i in range(n_jumps):
 
-        x = p.ajc.jump(x)
+        x = p.ajc.jump(x) ### JUMP CHAIN
         xs.append(x)
 
         pl.clf()
@@ -132,6 +135,7 @@ def run(p=BirthDeath(), n_jumps=100, n_gillespie=100):
     plt.figure()
     plot_activity(xs)
     plt.plot(gts.T, gxs.T, alpha=.1, color="white")
+    plt.title("AJC vs Gillespie")
 
     return locals()
 
