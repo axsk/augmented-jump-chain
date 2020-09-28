@@ -56,7 +56,7 @@ class sqra2d:
     def perturbed_copy(self, v):
         s = copy(self)
         s.u = self.u + np.reshape(v, self.u.shape)
-        s.Q = self.perturbed_Q(v)
+        s.Q = sqra(s.u.flatten(), s.A, s.beta, s.phi)
         return s
 
     def plot(self):

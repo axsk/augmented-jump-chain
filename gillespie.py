@@ -53,3 +53,19 @@ def temporal_gillespie_constant(qs, dts, x0, t0, n_iter):
         return np.exp(-rates)
     
     return temporal_gillespie(q_fun, int_fun, x0, t0, n_iter)
+
+def gillespie(Q, x0, n_iter):
+    x = x0
+    xs = [x]
+    ts = [0]
+    for i in range(n_iter):
+        rate = np.sum(Q[x,:]) - Q[x,x]
+        tau = np.random.exponential(1/rate)
+        q = Q[x,:] / rate
+        q[x] = 0
+        x = np.random.choice(range(len(q)), p=q)
+
+        ts.append(ts[-1]+tau)
+        xs.append(x)
+    
+    return np.array(xs), np.array(ts)

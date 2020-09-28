@@ -187,6 +187,7 @@ class Rprop:
         self.dec = dec
         self.max = max
         self.min = min
+        self.hist_x = [x0]
 
     def iterate(self):
         df = self.df(self.x)
@@ -200,6 +201,7 @@ class Rprop:
         dx = - g * np.sign(df)
         self.lastdf = df
         self.x += dx
+        self.hist_x.append(self.x.copy())
 
     def run(self, iter):
         for i in range(iter):
@@ -219,9 +221,9 @@ class Problem:
     def obj(self, x):
         self.perturb(x)
         m, d = self.hp.min_and_derivative()
-        print(m)
-        return -m, -d
+        print(-m)
+        return m, d
 
     def objwithpenalty(self, x, p):
         m, d = self.obj(x)
-        return m + p*np.sum(np.abs(x)), d + p
+        return m + p*np.sum(np.abs(x)), d + np.sign(x) * p
