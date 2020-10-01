@@ -9,31 +9,79 @@ def simpleq(n):
     np.fill_diagonal(Q, -np.sum(Q, axis=1))
     return Q
 
+def adjacency_ndbox(dims):
+    return adjacency_ndtorus(dims, torus = False)
+
+def adjacency_ndtorus(dims, torus = True):
+    nd = len(dims)
+    N = np.prod(dims)
+
+    neighbours = np.vstack([np.diag(np.ones(nd, dtype=int)), -np.diag(np.ones(nd, dtype=int))])
+    singletondim = np.array(dims) == 1
+    neighbours[:, singletondim] = 0
+
+    row = np.zeros(N*2*nd, dtype=int)
+    col = np.zeros(N*2*nd, dtype=int)
+    data = np.ones(N*2*nd, dtype=bool)
+    cut = np.zeros(N*2*nd, dtype=bool)
+
+    for i in range(N):
+        multi = np.unravel_index(i, dims) # find multiindex of current cell
+        mn = multi + neighbours # add neighbour offset
+        if not torus:
+            cut[i*2*nd:(i+1)*2*nd] = np.sum((mn < 0) + ( mn >= dims), axis=1) # check if boundary is hit
+        mn = np.mod(multi + neighbours, dims) # glue together boundary
+        neighbour_flat = np.ravel_multi_index(mn.T, dims) # back to flat inds
+        #print(neighbour_flat)
+        row[i*2*nd:(i+1)*2*nd] = i
+        col[i*2*nd:(i+1)*2*nd] = neighbour_flat
+ 
+    if not torus: # cut out the points which were glued at boundaries
+        sel = ~cut
+        data = data[sel]
+        row = row[sel]
+        col = col[sel]
+
+    #return row, col
+    A = sp.coo_matrix((data, (row, col))).tocsr()
+    A[np.diag_indices_from(A)] = False
+    return A
+
+
 def adjacency2d(nx, ny):
-    """ sparse adjacency matrix for a 2d grid """
-    Q = sp.csr_matrix((nx*ny, nx*ny))
+    print("adjacency2d is deprecated, use adjacency_nbox")
+    return adjacency_ndbox((ny,nx))
 
-    def cartesian_to_linear(i,j):
-        return np.ravel_multi_index((j,i), (ny,nx)) 
+class Sqra:
+    def __init__(self, u, beta=1, phi=1, torus=False):
+        self.u = u
+        self.beta = beta
+        self.phi = phi
 
-    for i in range(nx):
-        for j in range(ny):
-            fr = cartesian_to_linear(i,j)
-            if i+1<nx:
-                to = cartesian_to_linear(i+1,j)
-                Q[fr,to] = 1
-            if i>0:
-                to = cartesian_to_linear(i-1,j)
-                Q[fr,to] = 1
-            if j+1<ny:
-                to = cartesian_to_linear(i,j+1)
-                Q[fr,to] = 1
-            if j>0:
-                to = cartesian_to_linear(i,j-1)
-                Q[fr,to] = 1
+        self.dims = np.shape(u)
+        self.A = adjacency_ndtorus(self.dims, torus)
+        self.Q = self.sqra_Q()
+        self.N = self.Q.shape[0]
+    
+    def sqra_Q(self):
+        return sqra(self.u.flatten(), self.A, self.beta, self.phi)
+    
+    def perturbed(self, v):
+        s = copy(self)
+        s.u = self.u + np.reshape(v, self.u.shape)
+        s.Q = s.sqra_Q()
+        return s
 
-    #rowsum = np.array(Q.sum(axis=1)).flatten()
-    return Q# - sp.diags(rowsum)
+    def plot(self, potential=True, generator=True):
+        if potential:
+            plt.title("SQRA potential")
+            plt.imshow(self.u)
+            plt.colorbar()
+        if generator:
+            plt.figure()
+            plt.title("SQRA generator")
+            plt.imshow(self.Q.toarray())
+            plt.colorbar()
 
 import matplotlib.pyplot as plt
 from copy import copy
@@ -48,7 +96,8 @@ class sqra2d:
         self.A = adjacency2d(self.nx, self.ny)
         self.Q = sqra(self.u.flatten(), self.A, self.beta, self.phi)
         self.N = self.Q.shape[0]
-    
+
+   
     def perturbed_Q(self, v):
         """ compute the resulting sqra for a perturbation of the original potential"""
         return sqra(self.u.flatten() + v.flatten(), self.A, self.beta, self.phi)
