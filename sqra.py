@@ -83,6 +83,41 @@ class Sqra:
             plt.imshow(self.Q.toarray())
             plt.colorbar()
 
+    def _init_dq(self):
+        # precompute the sparse representation of the derivative
+        Q = self.Q
+        u = self.u.flatten()
+        beta = self.beta
+
+        rows =  beta/2 * Q.T   # rows[:,k] is the k-th row of the k-th derivative
+        cols = -beta/2 * Q     # cols[:,k] is the k-th col of the k-th derivative
+        diaginds = np.diag_indices_from(rows)
+        rows[diaginds] = 0
+        cols[diaginds] = 0
+        diags = - cols
+        diags[diaginds] += -np.sum(rows, axis=0)
+
+        self.dq_rows = rows
+        self.dq_cols = cols
+        self.dq_diag = diags
+
+    def dQ(self, y):
+        # return a function 'multiplier'
+        # compute the derivative of the sqra Q=sqra(u) at u in direction y
+        # dQ(y)[i,j] = [ dQ/dy(u+y) ]_ij
+
+        if not hasattr(self, 'dq_diag'):
+            self._init_dq()
+
+
+        ydiag = sp.spdiags(y, 0, self.N, self.N)
+
+        d  = self.dq_cols.dot(ydiag)
+        d += ydiag.dot(self.dq_rows.T)
+        d += sp.spdiags(self.dq_diag.dot(y), 0, self.N, self.N)
+
+        return d
+
 import matplotlib.pyplot as plt
 from copy import copy
 

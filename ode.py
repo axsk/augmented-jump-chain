@@ -177,32 +177,7 @@ class finite_time_hitting_prob_adjoint:
 
 import scipy.sparse as sp
 
-def dqmultiplier(Q, u, beta=1):
-    # return a function 'multiplier'
-    # which in turn gives the derivative of the sqra Q=sqra(u) by u applied to y
-    # i.e. multiplier = dqmultiplier(Q, u)
-    # multiplier(y)[i,j] = (dQ/du_j * y)_i
- 
 
-    nx = Q.shape[0]
-
-    rows =  beta/2 * Q.T   # rows[:,k] is the k-th row of the k-th derivative
-    cols = -beta/2 * Q     # cols[:,k] is the k-th col of the k-th derivative
-    diaginds = np.diag_indices_from(rows)
-    rows[diaginds] = 0
-    cols[diaginds] = 0
-    diags = - cols
-    diags[diaginds] += -np.sum(rows, axis=0)
-    #diags = -np.sum(rows, axis=0)  # diags[:,k] is the diagonal of the k-th derivative
-
-    def multiplier(y):
-        d  = cols.dot(sp.spdiags(y, 0, nx, nx))
-        #d += np.diag(y).dot(rows.T)
-        d += sp.spdiags(y, 0, nx, nx).dot(rows.T)
-        d += sp.spdiags(diags.dot(y), 0, nx, nx)
-        return d
-    
-    return multiplier
 
 
 # OLD softmin, did not really work as supposed
@@ -215,12 +190,13 @@ def dsoftmin_p(xs, p=-40):
     #inner = p * xs ** (p-1)
     return np.sum(xs ** p) ** (1/p - 1) * (xs ** (p-1))
 
+SOFTMIN_REL_SCALE = 26
 
 # wrapper around the relative softmin
-def softmin(xs, scale=13):
+def softmin(xs, scale=SOFTMIN_REL_SCALE):
     return softmin_rel(xs, scale)
 
-def dsoftmin(xs, scale=13):
+def dsoftmin(xs, scale=SOFTMIN_REL_SCALE):
     return fd_softmin_rel(xs, scale)[1]
 
 # scale invariant version of softmin_e due to log/exp transformation
@@ -255,7 +231,7 @@ def softmax(xs):
 from optimizers import Rprop
 
 class Problem:
-    def __init__(self, sqra, dts, penalty=0.00001, g0=0.1, x0=None, maxsubder=1, optimizer=Rprop(), verbose=False):
+    def __init__(self, sqra, dts, penalty=0.00001, x0=None, maxsubder=1, optimizer=Rprop(), verbose=False):
         self.sqra = sqra
         self.dts = dts
         self.penalty = penalty
@@ -265,8 +241,8 @@ class Problem:
         if x0 is None:
             x0 = np.zeros(self.sqra.N)
 
-        self.x = None
 
+        self.x = None
         self.histx = []
         self.histobj = []
         self.histmin = []
@@ -277,7 +253,6 @@ class Problem:
 
         self.perturb(x0)
 
-        g0 = np.ones(self.sqra.N) * g0
         self.optim = optimizer
         self.optim.initialize(f=self.objcall, df=self.dobjcall, x0=self.x)
 
