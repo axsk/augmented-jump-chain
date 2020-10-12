@@ -16,32 +16,6 @@ import numpy as np
 from scipy.sparse.construct import spdiags
 from matplotlib import pyplot as plt
 
-def finite_time_hitting_prob(Qs, dts, a, tol = 1e-8):
-    """ fhtp for state a """
-
-    nx = Qs[0].shape[0]
-    x0 = np.zeros(nx)
-    x0[a] = 1
-
-    ts = np.cumsum(dts)
-
-    def timeindex(t):
-            return next((i for i in range(len(ts)) if ts[i]>t), len(ts)-1)
-
-    def dq(x, t):
-        ti = timeindex(ts[-1] - t)
-        d = Qs[ti].dot(x)
-        d[a] = 0
-        d = np.nan_to_num(d)  # if the generator contains infinite rates, the matrix product results in inf-inf = nan
-        return d
-
-    return odeint(dq, x0, np.append([0], ts), rtol=tol, atol=tol)
-
-def finite_time_hitting_probs(Qs, dts) -> np.ndarray:
-    """ returns H[i,j] which is the fin. time hitting prob. to hit state i starting from j"""
-    nx = Qs[0].shape[0]
-    hps = np.array([finite_time_hitting_prob(Qs, dts, i)[-1,:] for i in range(nx)])
-    return hps.T
 
 class finite_time_hitting_prob_adjoint:
     def __init__(self, Qs, dts, us, nquad=500):
@@ -172,61 +146,7 @@ class finite_time_hitting_prob_adjoint:
             print("hardmin", hpmin)
         return hp, dg
 
-                                    
-            
 
-import scipy.sparse as sp
-
-
-
-
-# OLD softmin, did not really work as supposed
-def softmin_p(xs, p=-40):
-    "goes to minimum for negative alpha -> -infty "
-    return np.sum(xs ** p) ** (1/p)
-
-def dsoftmin_p(xs, p=-40):
-    #outer = 1/p * (np.sum(xs ** p)) ** (1/p - 1)
-    #inner = p * xs ** (p-1)
-    return np.sum(xs ** p) ** (1/p - 1) * (xs ** (p-1))
-
-SOFTMIN_REL_SCALE = 26
-
-# wrapper around the relative softmin
-def softmin(xs, scale=SOFTMIN_REL_SCALE):
-    return softmin_rel(xs, scale)
-
-def dsoftmin(xs, scale=SOFTMIN_REL_SCALE):
-    return fd_softmin_rel(xs, scale)[1]
-
-# scale invariant version of softmin_e due to log/exp transformation
-# the scale paramter controls the crispness of the softmin
-def softmin_rel(xs, scale=1):
-    return np.exp(softmin_e(np.log(xs) * scale) / scale)
-
-def fd_softmin_rel(xs, scale=1):
-    ls = np.log(xs) * scale
-    sm, dsm = fd_softmin_e(ls)
-    sr = np.exp(sm / scale)
-    dsr = sr * dsm / xs
-    return sr, dsr
-
-# average of xs weighted with softmax(-xs), i.e. the closeness to the minimum
-# this function is translation invariant
-def softmin_e(xs):
-    smax = softmax(-xs)
-    return smax @ xs
-
-def fd_softmin_e(xs):
-    smax = softmax(-xs)
-    smin = smax @ xs
-    return smin, smax * (1+smin - xs)
-
-# the classical softmax function
-def softmax(xs):
-    e = np.exp(xs)
-    smax = e / np.sum(e)
-    return smax
 
 from optimizers import Rprop
 
