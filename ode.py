@@ -1,10 +1,10 @@
-""" 
-ode finite time hitting probability computation 
+"""
+ode finite time hitting probability computation
 
 we have
 
 dq/dt (t,x) = - sum_y Q_xy(t) q(t,y) # in A'
-dq/dt (t,x) = 0 # in A 
+dq/dt (t,x) = 0 # in A
 q(T) = 1_A # terminal condition
 
 q(0,x) is the probability to hit set A in the finite timespan [0,T]
@@ -15,6 +15,89 @@ from scipy.integrate import odeint
 import numpy as np
 from scipy.sparse.construct import spdiags
 from matplotlib import pyplot as plt
+
+
+class ode_adjoint:
+    """
+    the # lines hold in general, but are not implemented
+    dynamics with parameter p
+
+    dy/dt = f(t,y,p)
+    #y(t0) = y0(p)
+    y(t0) = y0
+
+    #with desired observable g = g(y(T),p) at end time T
+    with desired observable g = g(y(T)) at end time T
+
+    # in general, but not implemented
+    #dg/dp (T) = mu(t0)^* dy0/dp + dg/dp(T) + int_t0^T [ mu^* df/dp] dt
+    dg/dp (T) = int_t0^T [ mu^* df/dp] dt
+
+    and corresponding adjoint system
+
+    dmu/dt = - (df/dy)* mu
+    mu(T) = dg/dy(T)
+
+
+    f: (y: Rn,t: R) -> Rn
+    y0: Rn
+    df_dy: (y: Rn, t:R) -> Rn
+    df_dp: (y: Rn, t:R) -> Rn
+    dg_dy: Rn
+    """
+    def __init__(self, f, y0, df_dy, df_dp, dg_dy, ts):
+        self.f = f
+        self.y0 = y0,
+        self.df_dy = df_dy
+        self.df_dp = df_dp
+        self.dg_dy = dg_dy
+        self.ts = ts
+
+    def solve(self):
+        y = odeint(self.f, self.y0, self.ts)
+        return y
+
+    def ode_mu(self):
+        def dmu(mu,t):
+            return -(self.df_dy(mu,t).T @ mu)
+
+        muT = self.dg_dy
+
+        mu = odeint(dmu, muT, np.flip(self.ts))
+        mu = np.flip(mu, axis=0)
+
+        return mu
+
+    def solve_adjoint(self):
+        y = self.solve()
+        mu = self.ode_mu()
+
+        dg = np.zeros_like(self.dg_dy)
+
+        for i in range(len(self.ts)-1):
+            dt = self.ts[i+1] - self.ts[i]
+            dg += dt * self.df_dp(y[i], self.ts[i]).T @ mu[i]
+
+        return dg
+
+from numpy.testing import assert_allclose
+
+def test_ode_adjoint(nt = 10, p = 2):
+    # dydt =
+    y0 = np.array(1)
+    f = lambda y,t: np.array(p * y)
+    df_dy = lambda y,t: np.array([p])
+    df_dp = lambda y,t: np.array([y])
+    dg_dy = np.array([1.])
+    ts = np.linspace(0, 1, nt)
+
+    adj = ode_adjoint(f, y0, df_dy, df_dp, dg_dy, ts)
+
+    y = adj.solve()
+    dg = adj.solve_adjoint()
+
+    assert_allclose(y[-1], np.exp(p))
+    assert_allclose(dg[0], np.exp(p))
 
 
 class finite_time_hitting_prob_adjoint:
@@ -46,14 +129,14 @@ class finite_time_hitting_prob_adjoint:
             d[j] = 0
             d = np.nan_to_num(d)
             return d
-        
+
         yT = np.zeros(self.nx)
         yT[j] = 1
 
         y = odeint(dydt, yT, np.flip(self.its))
         y = np.flip(y, axis=0)
         return y
-    
+
     def finite_time_hitting_probs(self):
         # compute all hitting probs and save the active minimium
         # hps[i,j] is the prob. to hit j when starting in i
@@ -70,7 +153,7 @@ class finite_time_hitting_prob_adjoint:
         # adjoint ode for the derivative of the active hp
 
         def dmu(mu, t):
-            mu[j] = 0  # equivalent to setting the j-th row of Q to 0 
+            mu[j] = 0  # equivalent to setting the j-th row of Q to 0
             d = -self.dfdy(t).T.dot(mu)
             d = np.nan_to_num(d)
             return d
@@ -86,7 +169,7 @@ class finite_time_hitting_prob_adjoint:
         return  self.dQs[self.timeindex(t)](y)
 
     def adjointintegrate(self, mu, y):
-        # int_0^T mu^* f_p 
+        # int_0^T mu^* f_p
 
         its = self.its
 
@@ -110,7 +193,7 @@ class finite_time_hitting_prob_adjoint:
         i, j  = self.sorthps(hps)[0,:]
         dg = self.derivative(i, j)
         return hps[i,j], dg
-    
+
     def derivative(self, i, j):
         y = self.ode_y(j)
         mu = self.ode_mu(i, j)
@@ -137,7 +220,7 @@ class finite_time_hitting_prob_adjoint:
 
             hpm.append(hp)
             dgs.append(self.derivative(i,j))
-        
+
         dg = dsoftmin(np.array(hpm)).dot(dgs)
         hp = softmin(np.array(hpm))
         if False:
@@ -180,7 +263,7 @@ class Problem:
     def objcall(self, x):
         self.perturb(x)
         return -self.obj
-    
+
     def dobjcall(self, x):
         self.perturb(x)
         return -self.dobj
