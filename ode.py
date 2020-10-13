@@ -13,107 +13,26 @@ q(0,x) is the probability to hit set A in the finite timespan [0,T]
 
 from scipy.integrate import odeint
 import numpy as np
-from scipy.sparse.construct import spdiags
 from matplotlib import pyplot as plt
 
-
-class ode_adjoint:
-    """
-    the # lines hold in general, but are not implemented
-    dynamics with parameter p
-
-    dy/dt = f(t,y,p)
-    #y(t0) = y0(p)
-    y(t0) = y0
-
-    #with desired observable g = g(y(T),p) at end time T
-    with desired observable g = g(y(T)) at end time T
-
-    # in general, but not implemented
-    #dg/dp (T) = mu(t0)^* dy0/dp + dg/dp(T) + int_t0^T [ mu^* df/dp] dt
-    dg/dp (T) = int_t0^T [ mu^* df/dp] dt
-
-    and corresponding adjoint system
-
-    dmu/dt = - (df/dy)* mu
-    mu(T) = dg/dy(T)
-
-
-    f: (y: Rn,t: R) -> Rn
-    y0: Rn
-    df_dy: (y: Rn, t:R) -> Rn
-    df_dp: (y: Rn, t:R) -> Rn
-    dg_dy: Rn
-    """
-    def __init__(self, f, y0, df_dy, df_dp, dg_dy, ts):
-        self.f = f
-        self.y0 = y0,
-        self.df_dy = df_dy
-        self.df_dp = df_dp
-        self.dg_dy = dg_dy
-        self.ts = ts
-
-    def solve(self):
-        y = odeint(self.f, self.y0, self.ts)
-        return y
-
-    def ode_mu(self):
-        def dmu(mu,t):
-            return -(self.df_dy(mu,t).T @ mu)
-
-        muT = self.dg_dy
-
-        mu = odeint(dmu, muT, np.flip(self.ts))
-        mu = np.flip(mu, axis=0)
-
-        return mu
-
-    def solve_adjoint(self):
-        y = self.solve()
-        mu = self.ode_mu()
-
-        dg = np.zeros_like(self.dg_dy)
-
-        for i in range(len(self.ts)-1):
-            dt = self.ts[i+1] - self.ts[i]
-            dg += dt * self.df_dp(y[i], self.ts[i]).T @ mu[i]
-
-        return dg
-
-from numpy.testing import assert_allclose
-
-def test_ode_adjoint(nt = 10, p = 2):
-    # dydt =
-    y0 = np.array(1)
-    f = lambda y,t: np.array(p * y)
-    df_dy = lambda y,t: np.array([p])
-    df_dp = lambda y,t: np.array([y])
-    dg_dy = np.array([1.])
-    ts = np.linspace(0, 1, nt)
-
-    adj = ode_adjoint(f, y0, df_dy, df_dp, dg_dy, ts)
-
-    y = adj.solve()
-    dg = adj.solve_adjoint()
-
-    assert_allclose(y[-1], np.exp(p))
-    assert_allclose(dg[0], np.exp(p))
+from softmin import softmin, dsoftmin
 
 
 class finite_time_hitting_prob_adjoint:
-    def __init__(self, Qs, dts, us, nquad=500):
-        self.Qs = Qs
+    def __init__(self, sqras, dts, us, nquad=500):
+        self.sqras = sqras
+        self.Qs = [s.Q for s in sqras]
         self.dts = dts
         self.cts = np.cumsum(dts)
         self.us = us
 
-        self.nx = Qs[0].shape[0]
+        self.nx = sqras[0].N
         self.nt = len(dts)
 
         self.nquad = nquad # integration stepsize
         self.its = np.linspace(0, self.cts[-1], nquad)
 
-        self.dQs = [dqmultiplier(Qs[i], us[i].flatten()) for i in range(self.nt)]
+        self.dQs = [s.dQ for s in sqras]
 
     def timeindex(self, t):
         return next((i for i in range(self.nt) if self.cts[i]>t), len(self.cts)-1)
@@ -276,8 +195,9 @@ class Problem:
         self.x = x.copy()
         self.s = self.sqra.perturbed(x)
         self.Qs = [self.s.Q] * len(self.dts)
+        sqras = [self.sqra] * len(self.dts)
         self.us = [self.s.u] * len(self.dts)
-        self.hp = finite_time_hitting_prob_adjoint(self.Qs, self.dts, self.us)
+        self.hp = finite_time_hitting_prob_adjoint(sqras, self.dts, self.us)
 
         #self.hpmin, self.dhpmin = self.hp.min_and_derivative()
         self.hpmin, self.dhpmin = self.hp.relaxedminderivative(nmax=self.maxsubder)
