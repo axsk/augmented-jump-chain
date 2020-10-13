@@ -1,15 +1,7 @@
 import numpy as np
 
-# OLD softmin, did not really work as supposed
-def softmin_p(xs, p=-40):
-    "goes to minimum for negative alpha -> -infty "
-    return np.sum(xs ** p) ** (1/p)
-
-def dsoftmin_p(xs, p=-40):
-    #outer = 1/p * (np.sum(xs ** p)) ** (1/p - 1)
-    #inner = p * xs ** (p-1)
-    return np.sum(xs ** p) ** (1/p - 1) * (xs ** (p-1))
-
+# default value for scaling the relative softmin
+# deviations of 10% are taken into account with approx 10%
 SOFTMIN_REL_SCALE = 26
 
 # wrapper around the relative softmin
@@ -47,3 +39,15 @@ def softmax(xs):
     e = np.exp(xs)
     smax = e / np.sum(e)
     return smax
+
+
+### OLD softmin, did not really work as supposed
+
+def softmin_p(xs, p=-40):
+    "goes to minimum for negative alpha -> -infty "
+    return np.sum(xs ** p) ** (1/p)
+
+def dsoftmin_p(xs, p=-40):
+    #outer = 1/p * (np.sum(xs ** p)) ** (1/p - 1)
+    #inner = p * xs ** (p-1)
+    return np.sum(xs ** p) ** (1/p - 1) * (xs ** (p-1))
