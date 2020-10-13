@@ -19,7 +19,7 @@ def gillespie(Q, x0, n_iter):
 
         ts.append(ts[-1]+tau)
         xs.append(x)
-    
+
     return np.array(xs), np.array(ts)
 
 
@@ -54,7 +54,7 @@ def temporal_gillespie_constant(qs, dts, x0, t0, n_iter):
 
     def q_fun(t):
         return qs[get_index(t)].toarray()
-    
+
     def int_fun(s, t, x):
         if t<s:
             return 0
@@ -73,5 +73,5 @@ def temporal_gillespie_constant(qs, dts, x0, t0, n_iter):
         rates += qs[i_t][x,x] * (t - ts[i_t-1])
 
         return np.exp(-rates)
-    
+
     return temporal_gillespie(q_fun, int_fun, x0, t0, n_iter)

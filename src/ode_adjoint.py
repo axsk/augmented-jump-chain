@@ -3,6 +3,8 @@ solver to the ode adjoint problem
 y'(t,p) = f(y,t,p)
 g = g(y(T,p))
 dg/dp = ?
+
+following the notation from the
 """
 
 

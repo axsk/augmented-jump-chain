@@ -96,7 +96,7 @@ class AJCS(ajc.AJCGalerkin):
         jp = deepcopy(self)
         if x0 is None:
             x0 = np.zeros_like(j.Q[0].data)
-        
+
         def obj(x):
             self.lastx = x
             for t in range(j.nt):
@@ -104,12 +104,12 @@ class AJCS(ajc.AJCGalerkin):
                 jp.Q[t].data = j.Q[t].data + x
             jp.compute()
             o = - min(jp.finite_time_hitting_probs())
-            op = o + np.sum(np.abs(x)) ** 2 * penalty 
+            op = o + np.sum(np.abs(x)) ** 2 * penalty
             print(op)
             return op
 
             # q = sqrt (exp -bU / exp -bU)
-        
+
         res = minimize(obj, x0=x0, method='nelder-mead', options={'maxiter': iters, 'adaptive': adaptive})
         obj(res.x)
         return res, jp
@@ -135,7 +135,7 @@ class AJCS(ajc.AJCGalerkin):
 
         return qt, qi.T
 
- 
+
 
 def flatten_spacetime(tensor):
     ns, nt = tensor.shape

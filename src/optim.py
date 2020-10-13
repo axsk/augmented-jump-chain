@@ -17,7 +17,7 @@ class SqraOptim:
         self.x = self.default_x0() if x0 is None else x0
 
         self.reset()
-    
+
 
     ### Optimizer
 
@@ -44,9 +44,9 @@ class SqraOptim:
         self.hist_x = []
         self.hist_o = []
         self.simplex = None
-    
+
     def saveiter(self, x, o):
-        self.iters += 1 
+        self.iters += 1
         self.x = x
         self.o = o
         self.hist_x.append(x.flatten())
@@ -77,11 +77,11 @@ class SqraOptim:
 
 
     ## Plot functions
-    
+
     def plot(self):
         fig, ax = plt.subplots(3,1, constrained_layout=True, figsize=(6,8))
         fig.suptitle("penalty: " + str(self.penalty))
-        
+
         self.plot_perturbation_history(ax[0])
         self.plot_objective_history(ax[1])
         self.plot_initial_optimal_potential(ax[2])
@@ -124,11 +124,11 @@ class SqraOptim:
         x = self.x.reshape(self.nt, self.nx)
         plt.imshow(x)
         plt.colorbar()
-    
+
     def scatter(self):
         x = self.x.reshape(self.nt, self.sqra.ny, self.sqra.nx)
         return scatter_3d_array(x)
- 
+
 import plotly.express as px
 
 def scatter_3d_array(x):
@@ -140,14 +140,14 @@ def scatter_3d_array(x):
         z[l,0:3] = i,j,k
         z[l,3] = np.abs(val)
         z[l,4] = val
-    
+
     return px.scatter_3d(z, x=0, y=1, z=2, size=3, color=4,  labels = {'0':'t', '1':'y', '2':'x'})
 
 import plotly.graph_objects as go
 
 def stack_3darray(x):
     return go.Figure(data=[go.Surface(z = z) for z in x])
-    
+
 
 def penaltyheuristic(sqra):
     return 1 / np.sum(np.max(sqra.u)-sqra.u)

@@ -1,6 +1,6 @@
-""" 
+"""
 Scalable Probabilistic Approximation
-as in 
+as in
 [1] https://advances.sciencemag.org/content/6/5/eaaw0961
 [2] https://advances.sciencemag.org/content/advances/suppl/2020/01/27/6.5.eaaw0961.DC1/aaw0961_SM.pdf
 
@@ -13,7 +13,7 @@ import quadprog
 class Spa_core:
     """
     SPA for least-squares approximation with tikhonov regularization (SPA2 in [2] p.16)
-    [S, T] = argmin ||X-ST||_2 + eps * H(S) 
+    [S, T] = argmin ||X-ST||_2 + eps * H(S)
     where X is the data, S the cluster- and T the probability-matrix.
     H denotes a (modified) Tikhonov regularization term.
     """
@@ -25,7 +25,7 @@ class Spa_core:
         G = Spa_core.solve_G(X, S)
         return S, G
 
-    @staticmethod 
+    @staticmethod
     def solve_S(X, G, eps, use_inverse=False):
         """ solve S in euclidean case (spa2) with tikh regularization (27)
         due to Lemma (28) """
@@ -38,10 +38,10 @@ class Spa_core:
             S = X @ G.T @ np.linalg.inv(H)
         else:
             S = np.linalg.solve(H.T, G @ X.T).T
-        
+
         return S
 
-    @staticmethod    
+    @staticmethod
     def solve_G(X, S):
         """ solve T via the quadratic progamm from Lemma 11 (34)  """
         K = np.size(S, 1)
@@ -60,7 +60,7 @@ class Spa_core:
             b = S.T @ X[:, t]
             res = quadprog.solve_qp(A, b, C, c, 1)
             G[:, t] = res[0]
-        
+
         return G
 
 
@@ -93,8 +93,8 @@ class Spa(Spa_core):
         G = np.zeros([self.k, self.T])
         inds = np.random.choice(self.k, self.T)
         G[inds, range(self.T)] = 1
-        return G / np.sum(G, axis=0) 
-    
+        return G / np.sum(G, axis=0)
+
     def solve(self):
         LL = self.objective()
 
@@ -110,7 +110,7 @@ class Spa(Spa_core):
         return self
 
     def objective(self):
-        """ 
+        """
         objective function for euclidean spa with tikh regularization.
         note the unusual pairwise comparison in the tikh term.
         this function can be slow in comparison to the iteration itself.
@@ -158,9 +158,9 @@ def test_data(T=100, n=3):
     sig[2, 0:2, 0:2] = np.identity(2)
     sig[:, 2:n, 2:n] = np.identity(n-2) * .2/(n-2)
     sig[3] = sig[2]
-    
+
     inds = [t%k for t in range(T)]
     inds = np.sort(inds)
     X = np.array([np.random.multivariate_normal(mu[i,:], sig[i,:,:]) for i in inds])
-    
+
     return X.T

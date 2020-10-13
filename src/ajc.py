@@ -1,4 +1,4 @@
-""" 
+"""
 basic implementation of the augmented chain
 
 AJC: abstract class providing common methods
@@ -109,11 +109,11 @@ class AJC:
         b = np.zeros((nxt+nx, nx))
         b[nxt:, :] = np.identity(nx)
 
-        q = np.linalg.solve(A, b) 
+        q = np.linalg.solve(A, b)
         K = q[:nx, :nx]
         return K
 
-    
+
     def koopman_exp(self):
         K = np.identity(self.nx)
         for i in range(self.nt):

@@ -35,7 +35,7 @@ def adjacency_ndtorus(dims, torus = True):
         #print(neighbour_flat)
         row[i*2*nd:(i+1)*2*nd] = i
         col[i*2*nd:(i+1)*2*nd] = neighbour_flat
- 
+
     if not torus: # cut out the points which were glued at boundaries
         sel = ~cut
         data = data[sel]
@@ -62,10 +62,10 @@ class Sqra:
         self.A = adjacency_ndtorus(self.dims, torus)
         self.Q = self.sqra_Q()
         self.N = self.Q.shape[0]
-    
+
     def sqra_Q(self):
         return sqra(self.u.flatten(), self.A, self.beta, self.phi)
-    
+
     def perturbed(self, v):
         s = copy(self)
         s.u = self.u + np.reshape(v, self.u.shape)
@@ -132,7 +132,7 @@ class sqra2d:
         self.Q = sqra(self.u.flatten(), self.A, self.beta, self.phi)
         self.N = self.Q.shape[0]
 
-   
+
     def perturbed_Q(self, v):
         """ compute the resulting sqra for a perturbation of the original potential"""
         return sqra(self.u.flatten() + v.flatten(), self.A, self.beta, self.phi)
@@ -151,11 +151,11 @@ class sqra2d:
         plt.imshow(self.Q.toarray())
         plt.colorbar()
 
-    
+
 def doublewell2d(nx = 5, ny = 3, xlims=(-1.5,1.5), ylims=(-1.5,1.5)):
     """ evaluation of the 2d double well potential """
     xs = np.linspace(*xlims, nx)
-    ys = np.linspace(*ylims, ny) 
+    ys = np.linspace(*ylims, ny)
     xs, ys = np.meshgrid(xs, ys, sparse=True)
 
     return (xs**2-1)**2 + ys**2
@@ -179,7 +179,7 @@ def sqra(u, A, beta, phi):
     D  = sp.diags(pi)
     D1 = sp.diags(1 / pi)
     Q  = phi * D1.dot(A).dot(D)
-    rowsum = np.array(Q.sum(axis=1)).flatten() 
+    rowsum = np.array(Q.sum(axis=1)).flatten()
     for i in range(len(pi)):
         Q[i,i] = -rowsum[i]
     return Q

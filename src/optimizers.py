@@ -52,7 +52,7 @@ class Momentum(Optimizer):
 
     def reset(self):
         self.dx = np.zeros_like(self.x)
-    
+
     def iterate(self):
         self.df = self.call_df(self.x)
         self.dx =  self.alpha * self.dx - self.h * self.df
@@ -65,7 +65,7 @@ class RMSProp(Optimizer):
 
     def reset(self):
         self.v = np.zeros_like(self.x)
-    
+
     def iterate(self):
         self.df = self.call_df(self.x)
         self.v = self.gamma * self.v + (1 - self.gamma) * (self.df ** 2)
@@ -81,8 +81,8 @@ class Adam(Optimizer):
     def reset(self):
         self.n = 0
         self.m = np.zeros_like(self.x)
-        self.v = np.zeros_like(self.x) 
-    
+        self.v = np.zeros_like(self.x)
+
     def iterate(self):
         self.df = self.call_df(self.x)
         self.n += 1
@@ -102,5 +102,5 @@ class ScipyOpt(Optimizer):
         self.args = kwargs
 
     # TODO: dont ignore iter
-    def run(self, iter): 
+    def run(self, iter):
         self.x = minimize(self.call_f, self.x, jac=self.call_df, **self.args, options={"maxfev":iter}).x
