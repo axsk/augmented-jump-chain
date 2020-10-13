@@ -1,3 +1,10 @@
+"""
+sparse implementation of the Galerkin discretization to the AJC as in the preprint.
+
+also provides finite hitting time computations via the space-time committor approach.
+"""
+
+
 import ajc
 import scipy.sparse as sp
 import numpy as np

@@ -1,3 +1,13 @@
+""" 
+basic implementation of the augmented chain
+
+AJC: abstract class providing common methods
+AJCGalerkin: The galerkin discretization from the preprint
+AJCCollocation: Simple discretization by evaluating the density of the AJC Transfer operator as transition probability
+
+Also provides methods for computing finite time hitting probablities and koopman operators via the commitor approach.
+"""
+
 import numpy as np
 from scipy.linalg import expm
 
@@ -132,9 +142,6 @@ class AJC:
 
         p = np.linalg.inv(M).dot(b)
         return p
-
-
-
 
 
     def unflatten(self, x, dims=None):

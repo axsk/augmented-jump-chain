@@ -1,3 +1,12 @@
+"""
+joint work with vikram
+
+a simple birth-death model
+approximated with the augmented jump chain (with the collocation discretization)
+and compared to the classical evolution
+"""
+
+
 import numpy as np
 import pdb
 import pylab as pl
