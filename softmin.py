@@ -1,3 +1,5 @@
+import numpy as np
+
 # OLD softmin, did not really work as supposed
 def softmin_p(xs, p=-40):
     "goes to minimum for negative alpha -> -infty "
