@@ -14,17 +14,19 @@ q(0,x) is the probability to hit set A in the finite timespan [0,T]
 from scipy.integrate import odeint
 import numpy as np
 from matplotlib import pyplot as plt
+from softmin import fd_softmin_rel
 
-from softmin import softmin, dsoftmin
 
+class hitting_prob_adjoint:
+    """
+    Class for computing the finite time hitting probability
+    for given SQRA at different times.
+    Also computes the derivative of the desired hitting probability wrt. to the potential u
+    """
 
-class finite_time_hitting_prob_adjoint:
-    def __init__(self, sqras, dts, us, nquad=500):
-        self.sqras = sqras
-        self.Qs = [s.Q for s in sqras]
+    def __init__(self, sqras, dts, nquad=100):
         self.dts = dts
         self.cts = np.cumsum(dts)
-        self.us = us
 
         self.nx = sqras[0].N
         self.nt = len(dts)
@@ -32,6 +34,9 @@ class finite_time_hitting_prob_adjoint:
         self.nquad = nquad # integration stepsize
         self.its = np.linspace(0, self.cts[-1], nquad)
 
+        #self.sqras = sqras
+        self.Qs = [s.Q for s in sqras]
+        self.us = [s.u for s in sqras]
         self.dQs = [s.dQ for s in sqras]
 
     def timeindex(self, t):
@@ -56,22 +61,11 @@ class finite_time_hitting_prob_adjoint:
         y = np.flip(y, axis=0)
         return y
 
-    def finite_time_hitting_probs(self):
-        # compute all hitting probs and save the active minimium
-        # hps[i,j] is the prob. to hit j when starting in i
-        hps = np.zeros((self.nx, self.nx))
-
-        for j in range(self.nx):
-            y = self.ode_y(j)
-            hps[:,j] = y[0,:]
-
-        self.hps = hps
-        return hps
-
     def ode_mu(self, i, j):
         # adjoint ode for the derivative of the active hp
 
         def dmu(mu, t):
+            mu = mu.copy()
             mu[j] = 0  # equivalent to setting the j-th row of Q to 0
             d = -self.dfdy(t).T.dot(mu)
             d = np.nan_to_num(d)
@@ -83,22 +77,86 @@ class finite_time_hitting_prob_adjoint:
         mu = odeint(dmu, mu0, self.its)
         return mu
 
-    def dfdp(self, t, y):
+    def dfdp(self, t, y, j):
         # df/dp = -dQ/dp * y
-        return  self.dQs[self.timeindex(t)](y)
+        dfdp = self.dQs[self.timeindex(t)](y)
+        dfdp[j] = 0
+        return dfdp
 
-    def adjointintegrate(self, mu, y):
+    def adjointintegrate(self, mu, y, j):
         # int_0^T mu^* f_p
-
         its = self.its
-
         dg = np.zeros(self.nx)
+
         for i in range(len(its)-1):
             dt = its[i+1] - its[i]
-            dqy = self.dfdp(its[i], y[i])
+            dqy = self.dfdp(its[i], y[i], j)
             dg += dt * dqy.T.dot(mu[i])
 
         return dg
+
+    def hitting_probs(self):
+        # compute all hitting probs and save the active minimium
+        # hps[i,j] is the prob. to hit j when starting in i
+        hps = np.zeros((self.nx, self.nx))
+
+        for j in range(self.nx):
+            y = self.ode_y(j)
+            hps[:,j] = y[0,:]
+
+        self.hps = hps
+        return hps
+
+    def derivative(self, i, j):
+        y = self.ode_y(j)
+        mu = self.ode_mu(i, j)
+        dg = self.adjointintegrate(mu, y, j)
+
+        return dg
+
+
+class hitting_prob_min:
+    """ using the hitting_prob_adjoint solver,
+    compute the (relaxed) minimal hitting probabilities
+    """
+    def __init__(self, hitting_prob_adjoint, maxsubder=1, rtol=np.inf, softminscale = 30):
+        self.hpa = hitting_prob_adjoint
+        self.nx = self.hpa.nx
+        self.maxsubder = maxsubder
+        self.rtol = rtol
+        self.softminscale = softminscale
+
+    def relaxedmin(self):
+        hps = self.hpa.hitting_probs()
+        inds = self.sorthps(hps)
+
+        dg = np.zeros((self.nx))
+        hpmin = hps[inds[0,0],inds[0,1]]
+
+        hpm = []
+        dgs = []
+
+        for ind in inds[0:self.maxsubder]:
+            i,j = ind
+            hp = hps[i,j]
+            if hp > hpmin * (1+self.rtol):
+                break
+
+            hpm.append(hp)
+            dgs.append(self.hpa.derivative(i,j))
+
+        sm, dsm = fd_softmin_rel(np.array(hpm), self.softminscale)
+
+        hp = sm
+        dg = dsm @ dgs
+
+        return hp, dg
+
+    def min(self):
+        hps = self.hpa.hitting_probs()
+        i, j  = self.sorthps(hps)[0,:]
+        dg = self.hpa.derivative(i, j)
+        return hps[i,j], dg
 
     def sorthps(self, hps):
         """ given the hps matrix, return the indices of the minima
@@ -107,62 +165,20 @@ class finite_time_hitting_prob_adjoint:
         inds = np.vstack(inds).T
         return inds
 
-    def min_and_derivative(self):
-        hps = self.finite_time_hitting_probs()
-        i, j  = self.sorthps(hps)[0,:]
-        dg = self.derivative(i, j)
-        return hps[i,j], dg
-
-    def derivative(self, i, j):
-        y = self.ode_y(j)
-        mu = self.ode_mu(i, j)
-        dg = self.adjointintegrate(mu, y)
-
-        return dg
-
-    def relaxedminderivative(self, rtol = 0.1, nmax = 10):
-        hps = self.finite_time_hitting_probs()
-        inds = self.sorthps(hps)
-
-        dg = np.zeros((self.nx))
-        hpmin = hps[inds[0,0],inds[0,1]]
-        n = 0
-
-        hpm = []
-        dgs = []
-
-        for ind in inds[0:nmax]:
-            i,j = ind
-            hp = hps[i,j]
-            if hp > hpmin * (1+rtol):
-                break
-
-            hpm.append(hp)
-            dgs.append(self.derivative(i,j))
-
-        dg = dsoftmin(np.array(hpm)).dot(dgs)
-        hp = softmin(np.array(hpm))
-        if False:
-            print("softmin", hp)
-            print("mins", hpm)
-            print("hardmin", hpmin)
-        return hp, dg
-
-
 
 from optimizers import Rprop
 
-class Problem:
-    def __init__(self, sqra, dts, penalty=0.00001, x0=None, maxsubder=1, optimizer=Rprop(), verbose=False):
+class HittingProbOptimization:
+    def __init__(self, sqra, T, penalty=0.00001, x0=None, maxsubder=1, optimizer=Rprop(), verbose=False, softminscale=30):
         self.sqra = sqra
-        self.dts = dts
+        self.T = T
         self.penalty = penalty
         self.maxsubder = maxsubder
         self.verbose = verbose
+        self.softminscale = softminscale
 
         if x0 is None:
             x0 = np.zeros(self.sqra.N)
-
 
         self.x = None
         self.histx = []
@@ -172,12 +188,13 @@ class Problem:
         self.histdmin = []
         self.histdcost = []
 
-
         self.perturb(x0)
 
         self.optim = optimizer
         self.optim.initialize(f=self.objcall, df=self.dobjcall, x0=self.x)
 
+    def describe(self):
+        return self.optim.__class__.__name__ + " sd" + str(self.maxsubder) + "sc " + str(self.softminscale)
 
     def objcall(self, x):
         self.perturb(x)
@@ -190,17 +207,13 @@ class Problem:
     def print_status(self):
         print(f"hp:{self.hpmin}, cost:{self.cost}, obj:{self.obj}")
 
-
     def perturb(self, x):
         self.x = x.copy()
-        self.s = self.sqra.perturbed(x)
-        self.Qs = [self.s.Q] * len(self.dts)
-        sqras = [self.sqra] * len(self.dts)
-        self.us = [self.s.u] * len(self.dts)
-        self.hp = finite_time_hitting_prob_adjoint(sqras, self.dts, self.us)
+        self.sqra_perturbed = self.sqra.perturbed(x)
+        self.hpa = hitting_prob_adjoint([self.sqra_perturbed], [self.T])
+        self.hpm = hitting_prob_min(self.hpa, self.maxsubder, softminscale=self.softminscale)
 
-        #self.hpmin, self.dhpmin = self.hp.min_and_derivative()
-        self.hpmin, self.dhpmin = self.hp.relaxedminderivative(nmax=self.maxsubder)
+        self.hpmin, self.dhpmin = self.hpm.relaxedmin()
 
         self.cost = self.penalty * np.sum(np.abs(x))
         self.dcost = self.penalty * np.sign(x)

@@ -204,6 +204,7 @@ class AJCGalerkin(AJC):
     def __init__(self, Q, dt):
         self.nx = np.size(Q, axis=0)
         self.nt = len(dt)
+        assert np.size(Q, axis=2) == self.nt
         self.nxt = self.nx * self.nt
         self.Q = Q
         self.dt = dt

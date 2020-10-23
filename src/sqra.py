@@ -1,14 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
 
-def simpleq(n):
-    """ rate matrix of uniform 1d diffusion """
-    Q = np.zeros((n,n))
-    np.fill_diagonal(Q[1:,:], 1)
-    np.fill_diagonal(Q[:,1:], 1)
-    np.fill_diagonal(Q, -np.sum(Q, axis=1))
-    return Q
-
 def adjacency_ndbox(dims):
     return adjacency_ndtorus(dims, torus = False)
 
@@ -53,13 +45,14 @@ def adjacency2d(nx, ny):
     return adjacency_ndbox((ny,nx))
 
 class Sqra:
-    def __init__(self, u, beta=1, phi=1, torus=False):
+    def __init__(self, u, beta=1, phi=1, A=None, torus=False):
         self.u = u
         self.beta = beta
         self.phi = phi
 
         self.dims = np.shape(u)
-        self.A = adjacency_ndtorus(self.dims, torus)
+
+        self.A = adjacency_ndtorus(self.dims, torus) if A is None else A
         self.Q = self.sqra_Q()
         self.N = self.Q.shape[0]
 
@@ -67,10 +60,8 @@ class Sqra:
         return sqra(self.u.flatten(), self.A, self.beta, self.phi)
 
     def perturbed(self, v):
-        s = copy(self)
-        s.u = self.u + np.reshape(v, self.u.shape)
-        s.Q = s.sqra_Q()
-        return s
+        u = self.u + np.reshape(v, self.u.shape)
+        return Sqra(u, self.beta, self.phi, self.A)
 
     def plot(self, potential=True, generator=True):
         if potential:

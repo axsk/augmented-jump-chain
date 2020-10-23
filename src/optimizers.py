@@ -18,7 +18,7 @@ class Optimizer:
         pass
 
 class Rprop(Optimizer):
-    def __init__(self, g0=None, inc=1.2, dec=.5, max=50, min=0):
+    def __init__(self, g0=None, inc=1.2, dec=.5, max=np.inf, min=0):
         self.g = g0
         self.inc = inc
         self.dec = dec
