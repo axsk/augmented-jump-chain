@@ -26,6 +26,11 @@ class AJCS(ajc.AJCGalerkin):
         self.qt, self.qi = self.qtilde(self.Q)
         self.k, self.H, self.S = self.jumpkernel(self.qt, self.qi, self.dt)
 
+    def jump(self, p):
+        if not hasattr(self, "km"):
+            self.km = flatten_spacetime(self.k)
+        return np.reshape(p.flatten() @ self.km, p.shape)
+
     @staticmethod
     def jumpkernel(qt, qi, dt):
         """ compute the galerkin discretization of the jump kernel eq[50] """
