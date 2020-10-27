@@ -13,7 +13,7 @@ from copy import deepcopy
 from scipy.optimize import minimize
 
 
-class AJCS(ajc.AJCGalerkin):
+class AJCS():
     def __init__(self, Q, dt):
         self.nx = Q[0].shape[0]
         self.nt = len(dt)
@@ -26,10 +26,30 @@ class AJCS(ajc.AJCGalerkin):
         self.qt, self.qi = self.qtilde(self.Q)
         self.k, self.H, self.S = self.jumpkernel(self.qt, self.qi, self.dt)
 
+    @property
+    def km(self):
+        if not hasattr(self, "_km"):
+            self._km = flatten_spacetime(self.k)
+        return self._km
+
     def jump(self, p):
-        if not hasattr(self, "km"):
-            self.km = flatten_spacetime(self.k)
         return np.reshape(p.flatten() @ self.km, p.shape)
+
+    def geiger(self, p, n=100):
+        g = np.copy(p)
+        pp = p
+        for i in range(n):
+            pp = self.jump(pp)
+            g = g + pp
+        return g
+
+    def holding_probs(self):
+        S = (1 - np.cumsum(self.S, axis=1))
+        S = np.moveaxis(np.triu(np.moveaxis(S, 2, 0)), 0, 2)
+        return S
+
+    def synchronize(self, p):
+        return np.einsum('sti, is -> it', self.holding_probs(), p)
 
     @staticmethod
     def jumpkernel(qt, qi, dt):
