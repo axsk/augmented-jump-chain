@@ -142,7 +142,6 @@ class sqra2d:
         plt.imshow(self.Q.toarray())
         plt.colorbar()
 
-
 def doublewell2d(nx = 5, ny = 3, xlims=(-1.5,1.5), ylims=(-1.5,1.5)):
     """ evaluation of the 2d double well potential """
     xs = np.linspace(*xlims, nx)
