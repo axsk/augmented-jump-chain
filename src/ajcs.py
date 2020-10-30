@@ -98,17 +98,65 @@ class AJCS():
         return q
 
     def backwardsolve(self, K, b):
-        nt, nx = np.shape(b)
-        q = np.zeros((nt, nx))
+        nt = self.nt
+        b = b.copy()
+        q = np.zeros(np.shape(b))
 
         for s in range(nt)[::-1]:
             for t in np.arange(s, nt)[::-1]:
                 if s < t:
-                    b[s] -= K[s, t].dot(q[t])
+                    b[s] -= K[s, t] @ q[t]
                 elif s == t:
                     q[s] = spsolve(K[s, s], b[s])
 
         return q
+
+    def koopman_system_one(self, i):
+        nx, nt = self.nx, self.nt
+
+        K = - deepcopy(self.k)
+        b = np.zeros((nt, nx))
+        S = self.holding_probs()[:,-1,:]
+
+
+        for s in range(nt):
+            K[s,s] += sp.identity(nx)
+            b[s][i] = S[s,i]
+
+        K[-1,-1] = sp.identity(nx)
+        b[-1][:] = 0
+        b[-1][i] = 1
+
+        q = self.backwardsolve(K, b)
+        return q
+
+    def koopman_system_iterated(self):
+        nx = self.nx
+        K = np.zeros((nx, nx))
+        for i in range(nx):
+            K[:, i] = self.koopman_system_one(i)[0,:]
+        return K
+
+    def koopman_system(self):
+        return self.koopman_system_all()[0,:,:]
+
+    def koopman_system_all(self):
+        nx, nt = self.nx, self.nt
+        K = - deepcopy(self.k)
+        b = np.zeros((nt, nx, nx))
+
+        S = self.holding_probs()[:,-1,:]
+
+        for s in range(nt):
+            K[s,s] += sp.identity(nx)
+            b[s] = np.diag(S[s, :])
+
+        K[-1,-1] = sp.identity(nx)
+
+        q = self.backwardsolve(K, b)
+        return q
+
+
 
     def finite_time_hitting_probs(self):
         """ finite_time_hitting_probs[i,j] is the probability to hit state j starting in i in the time window of the process """
