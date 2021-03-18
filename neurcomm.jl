@@ -91,7 +91,8 @@ end
         delta = map((b,d) -> isnan(b) ? d : 0., b, delta)
         back(delta)
     end
-    y, pb
+    
+    m(x), pb
 end
 
 function plot(m::NNModel)
@@ -153,7 +154,8 @@ function train(iter=1000, batch=100;
         Chain(Dense(2,10,sigmoid), Dense(10,10,sigmoid), Dense(10,1,sigmoid)),
         triplewellbnd),
     opt = ADAM(0.01),
-    h = 0.1)
+    h = 0.1,
+    plotevery=Inf)
     ps = Flux.params(model)
     maxloss = 0
 
@@ -166,7 +168,7 @@ function train(iter=1000, batch=100;
 
         l, pb = Flux.pullback(ps) do
             losses = sqraloss_batch(model, x, triplewell, h)
-            sum(abs2,losses)
+            s = sum(abs2,losses)
             #sum(sqraloss(model, x, triplewell, h) for x in eachcol(x)) / batch
 
         end
@@ -176,7 +178,7 @@ function train(iter=1000, batch=100;
         Flux.Optimise.update!(opt, ps, grad)
 
         maxloss = max(maximum(losses))
-        if i % 10 == 0
+        if i % plotevery == 0
         plot(model)# |> display
         Plots.scatter!(x[1,:], x[2,:], legend=false, markersize = losses' / maxloss * 10) |> display
         end
