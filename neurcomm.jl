@@ -64,8 +64,6 @@ function NNModel()
         triplewellbnd)
 end
 
-import Zygote.@showgrad
-import Zygote._pullback
 #=
 function (m::NNModel)(x::AbstractMatrix)
     b = m.bndfun(x)
@@ -78,21 +76,37 @@ end
 =#
 
 function (m::NNModel)(x::AbstractMatrix)
-    b = m.bndfun(x)
-    y = m.nn(x)
-    map((b,y) -> isnan(b) ? y : b, b, y)
+    crispmodel(m, x)
 end
 
-@adjoint function (m::NNModel)(x::AbstractMatrix)
-    b = m.bndfun(x)
-    y, back = _pullback(m.nn, x)
-    y = map((b,c) -> isnan(b) ? y : b, b, y)
+function softmodel(m, x)
+    a = exp.(-30 * sum(abs2, x .- [ 1,0], dims=1)) # set a with bnd = 1
+    b = exp.(-30 * sum(abs2, x .- [-1,0], dims=1)) # set b with bnd = 0
+    r = 1 .- a .- b
+    m.nn(x) .* r + a
+end
+
+
+function crispmodel(m::NNModel, x::AbstractMatrix)
+    crispboundary(x, m.nn(x), m.bndfun)
+end
+
+function crispboundary(x, y, bndfun)
+    b = bndfun(x)
+    y = map((b,y) -> isnan(b) ? y : b, b, y)
+end
+
+@adjoint function crispboundary(x, y, bndfun)
+    dims = size(y)
+    b = bndfun(x)
+    y = map((b,y) -> isnan(b) ? y : b, b, y)
+    y = reshape(y, dims)
     function pb(delta)
         delta = map((b,d) -> isnan(b) ? d : 0., b, delta)
-        back(delta)
+        delta = reshape(delta, dims)
+        (nothing, reshape(delta, size(y)), nothing)
     end
-    
-    m(x), pb
+    y, pb
 end
 
 function plot(m::NNModel)
