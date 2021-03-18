@@ -41,9 +41,8 @@ function sqraloss_vec1(f, x, u, h)
     loss = dot(w, ft)
 end
 
-function sqraloss_batch(f, x, u, h)
+function sqraloss_batch(f, x, u, h; beta=5)
     n,m = size(x)
-    beta = 5
     stencil = dropgrad(hcat(zeros(n), diagm(h * ones(n)), diagm(-h * ones(n))))
     testpoints = reshape(x, n, 1, m) .+ stencil |> x->reshape(x, n, m*(2n + 1))
     ut = u(testpoints) |> x->reshape(x, 2*n+1, m)
@@ -65,19 +64,34 @@ function NNModel()
         triplewellbnd)
 end
 
+import Zygote.@showgrad
+import Zygote._pullback
+#=
 function (m::NNModel)(x::AbstractMatrix)
+    b = m.bndfun(x)
+    c = hook(g->replace(g, nothing=>0), m.nn(x))
+    map((b,c) -> isnan(b) ? c : b, b, c)
+end
 
-    a = exp.(-30 * sum(abs2, x .- [ 1,0], dims=1)) # set a with bnd = 1
-    b = exp.(-30 * sum(abs2, x .- [-1,0], dims=1)) # set b with bnd = 0
-    r = 1 .- a .- b
+@adjoint triplewellbnd(x::AbstractMatrix) = triplewellbnd(x), d->(nothing, )#(zeros(size(@show d)),)
 
-    m.nn(x) .* r + a
+=#
 
-    #b = dropgrad(m.bndfun(x))
-    #c = m.nn(x)
+function (m::NNModel)(x::AbstractMatrix)
+    b = m.bndfun(x)
+    y = m.nn(x)
+    map((b,y) -> isnan(b) ? y : b, b, y)
+end
 
-#    map((b,c) -> isnan(b) ? c : b, b, c)
-
+@adjoint function (m::NNModel)(x::AbstractMatrix)
+    b = m.bndfun(x)
+    y, back = _pullback(m.nn, x)
+    y = map((b,c) -> isnan(b) ? y : b, b, y)
+    function pb(delta)
+        delta = map((b,d) -> isnan(b) ? d : 0., b, delta)
+        back(delta)
+    end
+    y, pb
 end
 
 function plot(m::NNModel)
@@ -129,13 +143,9 @@ function triplewellbnd(v)
     return NaN
 end
 
-function triplewellbnd(x::AbstractMatrix)
-    #@show size(x)
-    #hook(x->@show(replace(x, nothing=>0)),map(triplewellbnd, eachcol(x)))
+function triplewellbnd(x::AbstractMatrix) 
     triplewellbnd.(eachcol(x))
 end
-
-#@adjoint triplewellbnd(x) = triplewellbnd(x), d->zero(x)
 
 
 function train(iter=1000, batch=100;
