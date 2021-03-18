@@ -64,19 +64,12 @@ function NNModel()
         triplewellbnd)
 end
 
-#=
-function (m::NNModel)(x::AbstractMatrix)
-    b = m.bndfun(x)
-    c = hook(g->replace(g, nothing=>0), m.nn(x))
-    map((b,c) -> isnan(b) ? c : b, b, c)
-end
 
-@adjoint triplewellbnd(x::AbstractMatrix) = triplewellbnd(x), d->(nothing, )#(zeros(size(@show d)),)
-
-=#
 
 function (m::NNModel)(x::AbstractMatrix)
-    crispmodel(m, x)
+    crispboundary(x, m.nn(x), m.bndfun)
+    #crispboundary2(x, m.nn(x), m.bndfun)
+    #softboundary(x, m.nn(x),  m.bndfun)
 end
 
 function softmodel(m, x)
@@ -86,9 +79,11 @@ function softmodel(m, x)
     m.nn(x) .* r + a
 end
 
-
-function crispmodel(m::NNModel, x::AbstractMatrix)
-    crispboundary(x, m.nn(x), m.bndfun)
+function softboundary(x, y, _)
+    a = exp.(-30 * sum(abs2, x .- [ 1,0], dims=1)) # set a with bnd = 1
+    b = exp.(-30 * sum(abs2, x .- [-1,0], dims=1)) # set b with bnd = 0
+    r = 1 .- a .- b
+    y .* r + a
 end
 
 function crispboundary(x, y, bndfun)
@@ -108,6 +103,17 @@ end
     end
     y, pb
 end
+
+
+function crispboundary2(x, y, bndfun)
+    b = bndfun(x)
+    y = hook(g->replace(g, nothing=>0), y')
+    map((b,y) -> isnan(b) ? y : b, b, y)
+end
+
+@adjoint triplewellbnd(x::AbstractMatrix) = triplewellbnd(x), d->(nothing, )#(zeros(size(@show d)),)
+
+
 
 function plot(m::NNModel)
     xs = -3:.1:3
