@@ -67,9 +67,9 @@ end
 
 
 function (m::NNModel)(x::AbstractMatrix)
-    crispboundary(x, m.nn(x), m.bndfun)
+    #crispboundary(x, m.nn(x), m.bndfun)
     #crispboundary2(x, m.nn(x), m.bndfun)
-    #softboundary(x, m.nn(x),  m.bndfun)
+    softboundary(x, m.nn(x),  m.bndfun)
 end
 
 function softmodel(m, x)
@@ -111,14 +111,23 @@ function crispboundary2(x, y, bndfun)
     map((b,y) -> isnan(b) ? y : b, b, y)
 end
 
-@adjoint triplewellbnd(x::AbstractMatrix) = triplewellbnd(x), d->(nothing, )#(zeros(size(@show d)),)
 
+dim(m::Flux.Chain) = size(m.layers[1].W, 2)
 
-
-function plot(m::NNModel)
+function plot(m)
     xs = -3:.1:3
     ys = -2:.1:2
-    zs = hcat(([x,y] for x in xs, y in ys)...)
+    zs = zeros(dim(m), length(xs) * length(ys))
+    i=1
+        for y in ys
+    for x in xs
+            zs[1,i] = x
+            zs[2,i] = y
+            i+=1
+        end
+    end
+
+    #zs = hcat(([x,y] for x in xs, y in ys)...)
     zs = reshape(m(zs), length(xs), length(ys))'
     heatmap(xs, ys, zs)
     contour!(xs, ys, zs, linewidth=2)
@@ -126,6 +135,7 @@ function plot(m::NNModel)
 
     #heatmap([m([x,y]) for x in -3:.1:3, y in -2:.1:2]')
 end
+
 
 Flux.trainable(m::NNModel) = (m.nn, )
 
@@ -164,10 +174,12 @@ function triplewellbnd(v)
     return NaN
 end
 
-function triplewellbnd(x::AbstractMatrix) 
+function triplewellbnd(x::AbstractMatrix)
     triplewellbnd.(eachcol(x))
 end
 
+
+@adjoint triplewellbnd(x::AbstractMatrix) = triplewellbnd(x), d->(nothing, )#(zeros(size(@show d)),)
 
 function train(iter=1000, batch=100;
     model = NNModel(
@@ -177,7 +189,7 @@ function train(iter=1000, batch=100;
     h = 0.1,
     plotevery=Inf)
     ps = Flux.params(model)
-    maxloss = 0
+    losshist = []
 
     for i in 1:iter
         local losses
@@ -188,22 +200,131 @@ function train(iter=1000, batch=100;
 
         l, pb = Flux.pullback(ps) do
             losses = sqraloss_batch(model, x, triplewell, h)
-            s = sum(abs2,losses)
+            s = sum(abs2,losses) / size(x, 2)
             #sum(sqraloss(model, x, triplewell, h) for x in eachcol(x)) / batch
 
         end
         #@show losses
+        push!(losshist, l)
         println(l)
         grad = pb(1)
         Flux.Optimise.update!(opt, ps, grad)
 
-        maxloss = max(maximum(losses))
+
         if i % plotevery == 0
-        plot(model)# |> display
-        Plots.scatter!(x[1,:], x[2,:], legend=false, markersize = losses' / maxloss * 10) |> display
+            maxloss = max(maximum(losses))
+            plot(model)# |> display
+            p1 = Plots.scatter!(x[1,:], x[2,:], legend=false, marker=((losses' / maxloss).^(1/1) * 10, stroke(0)))
+            p2 = Plots.plot(losshist, yscale=:log10)
+            Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
         end
     end
     model
 end
 
+hyperwell(x) = 0.1*sum((x.^2 .-1).^2, dims=1)
+
+struct Committorproblem{T}
+    potential::T
+    h::Float64
+    beta::Float64
+    a::Vector{Float64}
+    b::Vector{Float64}
 end
+
+Committorproblem() = Committorproblem(triplewell, 0.1, 5., [1.,0], [-1.,0])
+
+function hyperproblem(n=2; h=.1, beta=5.)
+    a = ones(n)
+    b = ones(n)
+    b[1] = -1
+    Committorproblem(hyperwell, h, beta, a, b)
+end
+
+defaultmodel(c::Committorproblem) = Chain(Dense(length(c.a), 10, σ), Dense(10, 10, σ), Dense(10, 1, σ))
+
+function sample(c::Committorproblem, n)
+    if length(c.a) == 2
+        x = rand(2,n) .* [6, 4] .- [3,2]
+    else
+        x = rand(length(c.a),n) .* 4 .- 2
+    end
+end
+
+
+
+
+import Zygote.@showgrad
+
+function getboundary(c::Committorproblem, x)
+    a = exp.(-30 * sum(abs2, x .- c.a, dims=1)) # set a with bnd = 1
+    b = exp.(-30 * sum(abs2, x .- c.b, dims=1)) # set b with bnd = 0
+    r = 1 .- a .- b
+    a, b, r
+end
+
+function boundaryfixture(c::Committorproblem, f)
+    # given a function, return the function with fixed boundary values
+    function (x)
+        a, b, r = getboundary(c, x)
+        f(x) .* r .+ a
+    end
+end
+
+function losses(c::Committorproblem, f, x)
+
+    fb = boundaryfixture(c, f)
+
+    losses = sqraloss_batch(fb, x, c.potential, c.h, beta=c.beta)
+
+    # weight losses only inside the solution domain
+    _, _, r = getboundary(c, x)
+    losses = losses .* r
+    losses
+end
+
+function train2(batch=100, epochs=1000;
+        c = Committorproblem(),
+        model = defaultmodel(c),
+        opt = ADAM(0.01),
+        plotevery=Inf)
+
+
+    ps = Flux.params(model)
+    losshist = []
+
+    for i in 1:epochs
+        #x = rand(2,batch) .* [6, 4] .- [3,2]
+
+        x = sample(c, batch)
+
+        #xs = -3:.2:3
+        #ys = -2:.2:2
+        #x = hcat(([x,y] for x in xs, y in ys)...)
+
+        local pointlosses
+
+        l, pb = Flux.pullback(ps) do
+            pointlosses = losses(c, model, x)
+            sum(abs2, pointlosses) / size(x, 2)
+        end
+        #@show losses
+        push!(losshist, l)
+        println(l)
+        grad = pb(1)
+        Flux.Optimise.update!(opt, ps, grad)
+
+
+        if i % plotevery == 0
+            maxloss = max(maximum(pointlosses))
+            plot(model)# |> display
+            p1 = Plots.scatter!(x[1,:], x[2,:], legend=false, marker=((pointlosses' / maxloss).^(1/1) * 10, stroke(0)))
+            p2 = Plots.plot(losshist, yscale=:log10)
+            Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
+        end
+    end
+    model
+end
+
+
+end # module
