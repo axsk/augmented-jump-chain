@@ -88,62 +88,71 @@ hyperwell(x) = 0.1*sum((x.^2 .-1).^2, dims=1)
 
 abstract type Committorproblem end
 
-struct CommittorSmoothBoundary{T} <: Committorproblem
+using Parameters
+
+@with_kw struct CommittorSmoothBoundary{T} <: Committorproblem
     potential::T
-    h::Float64
-    beta::Float64
-    a::Vector{Float64}
+    h::Float64 = .1
+    beta::Float64 = 5
+    a::Vector{Float64} 
     b::Vector{Float64}
+    exp::Float64 = 30
 end
 
 dim(c::CommittorSmoothBoundary) = length(c.a)
 
-struct CommittorCrispBoundary{T,U} <: Committorproblem
+@with_kw struct CommittorCrispBoundary{T,U} <: Committorproblem
     potential::T
-    h::Float64
-    beta::Float64
+    h::Float64 = .1
+    beta::Float64 = 5
     bndcheck::U # function mapping a state to 1, 0 or anything else to encode for A, B or the interior
-    dim::Int
+    dim::Int 
 end
 
 dim(c::CommittorCrispBoundary) = c.dim
 
+CommittorCrispBoundary() = CommittorCrispBoundary(triplewell, 0.1, 5., triplewellbnd, 2)
 
-triplewellproplem() = CommittorSmoothBoundary(triplewell, 0.1, 5., [1.,0], [-1.,0])
+
+triplewellproplem() = CommittorSmoothBoundary(triplewell, 0.1, 5., [1.,0], [-1.,0], 30.)
 
 function hyperproblem(n=2; h=.1, beta=5.)
     a = ones(n)
     b = ones(n)
     b[1] = -1
-    CommittorSmoothBoundary(hyperwell, h, beta, a, b)
+    CommittorSmoothBoundary(hyperwell, h, beta, a, b, 30.)
 end
 
 defaultmodel(c::Committorproblem) = Chain(Dense(dim(c), 10, σ), Dense(10, 10, σ), Dense(10, 1, σ))
 
 function sample(c::Committorproblem, n)
-    if  == 2
+    if dim(c) == 2
         x = rand(2,n) .* [6, 4] .- [3,2]
     else
-        x = rand(length(c.a),n) .* 4 .- 2
+        x = rand(dim(c),n) .* 4 .- 2
     end
 end
 
 import Zygote.@showgrad
 
 function getboundary(c::CommittorSmoothBoundary, x)
-    a = exp.(-30 * sum(abs2, x .- c.a, dims=1)) # set a with bnd = 1
-    b = exp.(-30 * sum(abs2, x .- c.b, dims=1)) # set b with bnd = 0
+    a = exp.(-c.exp * sum(abs2, x .- c.a, dims=1)) # set a with bnd = 1
+    b = exp.(-c.exp * sum(abs2, x .- c.b, dims=1)) # set b with bnd = 0
     r = 1 .- a .- b
     a, b, r
 end
 
+@adjoint getboundary(c, x) = getboundary(c, x), delta->(nothing, nothing)
+
 function getboundary(c::CommittorCrispBoundary, x)
-    bnd = map(c.bndcheck, eachcol(x))
+    bnd = map(c.bndcheck, eachcol(x))'
     a = bnd .== 1
     b = bnd .== 0
     r = 1 .- a .- b
     a, b, r
 end
+
+#@adjoint getboundary(c::CommittorCrispBoundary, x) = getboundary(c, x), delta->(nothing, nothing)
 
 
 function boundaryfixture(c::Committorproblem, f)
@@ -166,7 +175,7 @@ function losses(c::Committorproblem, f, x)
     losses
 end
 
-function train2(batch=100, epochs=1000;
+function train(batch=100, epochs=1000;
         c = triplewellproplem(),
         model = defaultmodel(c),
         opt = ADAM(0.01),
