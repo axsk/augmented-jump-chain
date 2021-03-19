@@ -222,9 +222,14 @@ function train(iter=1000, batch=100;
     model
 end
 
+###############
+
+
 hyperwell(x) = 0.1*sum((x.^2 .-1).^2, dims=1)
 
-struct Committorproblem{T}
+abstract type Committorproblem end
+
+struct CommittorSmoothBoundary{T} <: Committorproblem
     potential::T
     h::Float64
     beta::Float64
@@ -232,36 +237,55 @@ struct Committorproblem{T}
     b::Vector{Float64}
 end
 
-Committorproblem() = Committorproblem(triplewell, 0.1, 5., [1.,0], [-1.,0])
+dim(c::CommittorSmoothBoundary) = length(c.a)
+
+struct CommittorCrispBoundary{T,U} <: Committorproblem
+    potential::T
+    h::Float64
+    beta::Float64
+    bndcheck::U # function mapping a state to 1, 0 or anything else to encode for A, B or the interior
+    dim::Int
+end
+
+dim(c::CommittorCrispBoundary) = c.dim
+
+
+triplewellproplem() = CommittorSmoothBoundary(triplewell, 0.1, 5., [1.,0], [-1.,0])
 
 function hyperproblem(n=2; h=.1, beta=5.)
     a = ones(n)
     b = ones(n)
     b[1] = -1
-    Committorproblem(hyperwell, h, beta, a, b)
+    CommittorSmoothBoundary(hyperwell, h, beta, a, b)
 end
 
-defaultmodel(c::Committorproblem) = Chain(Dense(length(c.a), 10, σ), Dense(10, 10, σ), Dense(10, 1, σ))
+defaultmodel(c::Committorproblem) = Chain(Dense(dim(c), 10, σ), Dense(10, 10, σ), Dense(10, 1, σ))
 
 function sample(c::Committorproblem, n)
-    if length(c.a) == 2
+    if  == 2
         x = rand(2,n) .* [6, 4] .- [3,2]
     else
         x = rand(length(c.a),n) .* 4 .- 2
     end
 end
 
-
-
-
 import Zygote.@showgrad
 
-function getboundary(c::Committorproblem, x)
+function getboundary(c::CommittorSmoothBoundary, x)
     a = exp.(-30 * sum(abs2, x .- c.a, dims=1)) # set a with bnd = 1
     b = exp.(-30 * sum(abs2, x .- c.b, dims=1)) # set b with bnd = 0
     r = 1 .- a .- b
     a, b, r
 end
+
+function getboundary(c::CommittorCrispBoundary, x)
+    bnd = map(c.bndcheck, eachcol(x))
+    a = bnd .== 1
+    b = bnd .== 0
+    r = 1 .- a .- b
+    a, b, r
+end
+
 
 function boundaryfixture(c::Committorproblem, f)
     # given a function, return the function with fixed boundary values
@@ -284,7 +308,7 @@ function losses(c::Committorproblem, f, x)
 end
 
 function train2(batch=100, epochs=1000;
-        c = Committorproblem(),
+        c = triplewellproplem(),
         model = defaultmodel(c),
         opt = ADAM(0.01),
         plotevery=Inf)
@@ -318,13 +342,16 @@ function train2(batch=100, epochs=1000;
         if i % plotevery == 0
             maxloss = max(maximum(pointlosses))
             plot(model)# |> display
-            p1 = Plots.scatter!(x[1,:], x[2,:], legend=false, marker=((pointlosses' / maxloss).^(1/1) * 10, stroke(0)))
+            p1 = Plots.scatter!(x[1,:], x[2,:], legend=false, 
+                marker=((pointlosses' / maxloss).^(1/1) * 10, stroke(0)))
             p2 = Plots.plot(losshist, yscale=:log10)
             Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
         end
     end
     model
 end
+
+export train
 
 
 end # module
