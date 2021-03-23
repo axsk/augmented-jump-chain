@@ -13,24 +13,7 @@ import Flux.Zygote.@adjoint
 
 ### learning core
 
-function sqraloss_batch(f, x, u, h; beta=5)
-    n,m = size(x)
-    stencil = dropgrad(hcat(zeros(n), diagm(h * ones(n)), diagm(-h * ones(n))))
-    testpoints = reshape(x, n, 1, m) .+ stencil |> x->reshape(x, n, m*(2n + 1))
-    ut = u(testpoints) |> x->reshape(x, 2*n+1, m)
-    ft = f(testpoints) |> x->reshape(x, 2*n+1, m)
-    w = exp.(-1/2 * beta * (ut .- ut[1, :]'))
-    #w[1,:] = -sum(w[2:end, :], dims=1)
-    w = vcat(-sum(w[2:end, :], dims=1), w[2:end,:])
-    loss = abs.(sum(w .* ft, dims=1))
-end
-
-function sampleloss(f, x, ys)
-    abs(mean(f(x) .- f(ys)))
-end
-
-
-
+#=
 function train(batch=100, epochs=1000;
     c = defaultproblem(),
     model = defaultmodel(c),
@@ -68,14 +51,15 @@ function train(batch=100, epochs=1000;
     end
     model
 end
+=#
 
 ### plotting
 
 dim(m::Flux.Chain) = size(m.layers[1].W, 2)
 
-function plot(m, c, nx=40, ny=30)
-    xs = range(c.bounds[1,:]..., length = nx)
-    ys = range(c.bounds[2,:]..., length = ny)
+function plot(m, bounds, nx=40, ny=30)
+    xs = range(bounds[1,:]..., length = nx)
+    ys = range(bounds[2,:]..., length = ny)
     zs = zeros(dim(m), length(xs) * length(ys))
 
     i=1
@@ -95,77 +79,6 @@ end
 ### Models
 
 
-abstract type Committorproblem end
-# implements defaultmodel, losses, sample
-
-defaultmodel(c::Committorproblem) = Chain(Dense(dim(c), 10, σ), Dense(10, 10, σ), Dense(10, 1, σ))
-
-function boundaryfixture(c::Committorproblem, f)
-    # given a function, return the function with fixed boundary values
-    function (x)
-        a, b, r = getboundary(c, x)
-        f(x) .* r .+ a
-    end
-end
-
-# since boundary sometimes poses differentiation problems
-#@adjoint getboundary(c, x) = getboundary(c, x), delta->(nothing, nothing)
-
-function losses(c::Committorproblem, f, x)
-
-    fb = boundaryfixture(c, f)
-
-    losses = sqraloss_batch(fb, x, c.potential, c.h, beta=c.beta)
-
-    # weight losses only inside the solution domain
-    _, _, r = getboundary(c, x)
-    losses = losses .* r
-    losses
-end
-
-sample(c::Committorproblem, n) = samplebox(c.bounds, n)
-dim(c::Committorproblem) = size(c.bounds, 1)
-
-function samplebox(bounds, n)
-    shift = bounds[:,2]
-    scale = (bounds[:,2] - bounds[:,1])
-    rand(size(bounds, 1), n) .* scale .- shift
-end
-
-### concrete models
-
-using Parameters
-
-# committor problem with shoothed boundaries around points a and b
-@with_kw struct CommittorSmoothBoundary{T} <: Committorproblem
-    potential::T
-    h::Float64 = .1
-    beta::Float64 = 5
-    a::Vector{Float64}
-    b::Vector{Float64}
-    exp::Float64 = 30
-    bounds::Matrix{Float64}
-end
-
-getboundary(c::CommittorSmoothBoundary, x) = smoothboundary(c.a, c.b, x)
-function smoothboundary(a, b, x)
-    a = exp.(-c.exp * sum(abs2, x .- c.a, dims=1)) # set a with bnd = 1
-    b = exp.(-c.exp * sum(abs2, x .- c.b, dims=1)) # set b with bnd = 0
-    r = 1 .- a .- b
-    a, b, r
-end
-
-# committor problem with variable potential and crisp boundary assignment
-@with_kw struct CommittorCrispBoundary{T,U} <: Committorproblem
-    potential::T
-    h::Float64 = .1
-    beta::Float64 = 5
-    bndcheck::U # function mapping a state to 1, 0 or anything else to encode for A, B or the interior
-    dim::Int
-    bounds::Matrix{Float64}
-end
-
-getboundary(c::CommittorCrispBoundary, x) = crispboundary(c.bndcheck, x)
 
 
 ### Boundary Types
@@ -174,18 +87,19 @@ abstract type Boundary end
 
 function boundaryfixture(b::Boundary, f)
     function (x)
-        a, b, r = getboundary(b, x)
+        a, _, r = getboundary(b, x)
         f(x) .* r .+ a
     end
 end
 
+## Crisp Boundary
 
-struct CustomCrisp{T}
+struct CustomCrisp{T} <: Boundary
     bndcheck::T
 end
 getboundary(b::CustomCrisp, x) = crispboundary(b.bndcheck, x)
 
-struct RadialCrisp{T<:AbstractVector}
+struct RadialCrisp{T<:AbstractVector} <: Boundary
     a::T
     b::T
     r::Float64
@@ -211,10 +125,26 @@ function crispboundary(bndcheck, x)
 end
 @adjoint crispboundary(bndcheck, x) = crispboundary(bndcheck, x), delta->(nothing, nothing)
 
+## Smooth Boundary
+
+struct RadialExp{T<:AbstractVector} <: Boundary
+    a::T
+    b::T
+    e::Float64
+end
+
+getboundary(c::RadialExp, x) = smoothboundary(c.a, c.b, c.e, x)
+function smoothboundary(a, b, e, x)
+    a = exp.(e * sum(abs2, x .- a, dims=1)) # set a with bnd = 1
+    b = exp.(e * sum(abs2, x .- b, dims=1)) # set b with bnd = 0
+    r = 1 .- a .- b
+    a, b, r
+end
+
 
 ### Committor Types
 
-### SQRA Committor
+## SQRA Committor
 struct CommittorSQRA{F, B}
     potential::F
     h::Float64
@@ -233,19 +163,132 @@ function losses(c::CommittorSQRA, f, x)
     losses = losses .* r
 end
 
-### Sampled Committor
+function sqraloss_batch(f, x, u, h; beta=5)
+    n,m = size(x)
+    stencil = dropgrad(hcat(zeros(n), diagm(h * ones(n)), diagm(-h * ones(n))))
+    testpoints = reshape(x, n, 1, m) .+ stencil |> x->reshape(x, n, m*(2n + 1))
+    ut = u(testpoints) |> x->reshape(x, 2*n+1, m)
+    ft = f(testpoints) |> x->reshape(x, 2*n+1, m)
+    w = exp.(-1/2 * beta * (ut .- ut[1, :]'))
+    #w[1,:] = -sum(w[2:end, :], dims=1)
+    w = vcat(-sum(w[2:end, :], dims=1), w[2:end,:])
+    loss = abs.(sum(w .* ft, dims=1))
+end
+
+## Sampled Committor
 
 struct CommittorSampled{B}
-    boundary::T
+    boundary::B
 end
+
+function losses(c::CommittorSampled, f, data)
+    fb = boundaryfixture(c.boundary, f)
+
+    losses = [sampleloss(fb, d[1], d[2]) for d in data]'
+
+    # weight losses only inside the solution domain
+    xs = hcat((d[1] for d in data)...) :: Matrix{Float64} # TODO find typestable+ad-able
+    _, _, r = getboundary(c.boundary, xs)
+    losses = losses .* r
+end
+
+function sampleloss(f, x, ys)
+    abs(mean(f(x) .- f(ys)))
+end
+
+function randbox(bounds, n)
+    shift = bounds[:,2]
+    scale = (bounds[:,2] - bounds[:,1])
+    rand(size(bounds, 1), n) .* scale .- shift
+end
+
+function mlp(x, in=2, sig=false)
+    first = Dense(in, x[1], σ)
+    if sig
+        last = Dense(x[end], 1, σ)
+    else
+        last = Dense(x[end], 1)
+    end
+    Chain(first, [Dense(x[i], x[i+1], σ) for i=1:length(x)-1]..., last)
+end
+
+
+function test_sqra(;hidden=[10,10], h=.1, beta=5., r=.1, samples=10_000, batch=100, plotevery=10, epochs=10)
+    model = NN.mlp(hidden)
+    c = CommittorSQRA(triplewell, h, beta, RadialCrisp([1,0],[-1,0], r))
+    data = randbox(triplewellbox, samples)
+    train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=batch, epochs=epochs)
+end
+
+function test_sampled(;hidden=[10,10], r=.1, samples=1_000, trajs=100, batch=1000, plotevery=10)
+    model = mlp(hidden)
+    c = CommittorSampled(RadialCrisp([1,0],[-1,0], r))
+    xs = randbox(triplewellbox, samples)
+
+    data = [(collect(x), x.+randn(2,trajs) *.1) for x in eachcol(xs)]
+    train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=batch)
+end
+
+
+
+function train(model, c, data;
+    epochs=1,
+    batch=1000,
+    bounds=[],
+    opt = ADAM(0.01),
+    plotevery=1
+    )
+
+    ps = Flux.params(model)
+    losshist = []
+
+    for i in 1:epochs
+        for (j,x) in enumerate(Flux.Data.DataLoader(data, batchsize=batch))
+            local pointlosses
+
+            l, pb = Flux.pullback(ps) do
+                pointlosses = losses(c, model, x)
+                sum(abs2, pointlosses) / size(x, 2)
+            end
+            #@show losses
+            push!(losshist, l)
+            println(l)
+            grad = pb(1)
+            Flux.Optimise.update!(opt, ps, grad)
+
+
+            if j % plotevery == 0
+                maxloss = max(maximum(pointlosses))
+                p1 = plot(model, bounds)# |> display
+                #Plots.plot()
+                if isa(x,Matrix{Float64})
+                    p1 = Plots.scatter!(x[1,:], x[2,:], legend=false,
+                        marker=((pointlosses' / maxloss).^(1/1) * 10, stroke(0)))
+                end
+                p2 = Plots.plot(losshist, yscale=:log10)
+                Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
+            end
+        end
+    end
+    model
+end
+
+
+
+
+#=
+
+defaultmodel(c::Committorproblem) = Chain(Dense(dim(c), 10, σ), Dense(10, 10, σ), Dense(10, 1, σ))
+sample(c::Committorproblem, n) = samplebox(c.bounds, n)
+dim(c::Committorproblem) = size(c.bounds, 1)
+
+
+
+
 
 dim(c::CommittorSampled) = size(c.bounds, 1)
 
 getboundary(c::CommittorSampled, x) = getboundary(c.boundary, x)
-function losses(c::CommittorSampled, f, data)
-    fb = boundaryfixture(c, f)
-    [sampleloss(fb, d[1], d[2]) for d in data]
-end
 
 function sample(c::CommittorSampled, n)
     d = []
@@ -265,6 +308,7 @@ function test()
     train(c=sp, plotevery=10)
 end
 
+=#
 
 
 
@@ -272,10 +316,11 @@ export train
 
 # concrete models
 
-defaultproblem() = TriplewellCrisp()
+#defaultproblem() = TriplewellCrisp()
 
 # Mullerbrown
-MullerBrown() = CommittorSmoothBoundary(mullerbrown, a=[0.6,0], b=[-0.55,1.4], mullerbrownbox)
+MullerBrown() = CommittorSQRA(mullerbrown, .1, 5, RadialCrisp([0.6,0], [-0.55,1.4], .1))
+#, mullerbrownbox)
 
 const mullerbrownbox = [-1.5 1; -.5 2]
 function mullerbrown(x::AbstractMatrix)
@@ -294,9 +339,9 @@ mullerbrown(x::AbstractVector) = mullerbrown(reshape(x, (2,1)))[1]
 mullerbrown(x, y) = mullerbrown([x,y])
 
 ## Triplewell
-TriplewellCrisp() = CommittorCrispBoundary(triplewell, 0.1, 5., triplewellbnd, 2, triplewellbox)
+#TriplewellCrisp() = CommittorCrispBoundary(triplewell, 0.1, 5., triplewellbnd, 2, triplewellbox)
 
-TriplewellSmooth() = CommittorSmoothBoundary(triplewell, 0.1, 5., [1.,0], [-1.,0], 30., triplewellbox)
+#TriplewellSmooth() = CommittorSmoothBoundary(triplewell, 0.1, 5., [1.,0], [-1.,0], 30., triplewellbox)
 
 const triplewellbox = [-3. 3; -2 2]
 
@@ -318,7 +363,7 @@ function triplewell(x::Matrix)
         + 1/20 * x^4 + 1/20 * (y-1/3)^4)
 end
 
-function triplewellbnd(v)
+function triplewellcustombnd(v)
     x, y = v
     if abs(y) < 0.2
         if 0.8 < x < 1.2
@@ -330,19 +375,19 @@ function triplewellbnd(v)
     return NaN
 end
 
-function triplewellbnd(x::AbstractMatrix)
+function triplewellcustombnd(x::AbstractMatrix)
     triplewellbnd.(eachcol(x))
 end
-@adjoint triplewellbnd(x::AbstractMatrix) = triplewellbnd(x), d->(nothing, )#(zeros(size(@show d)),)
+@adjoint triplewellcustombnd(x::AbstractMatrix) = triplewellcustombnd(x), d->(nothing, )#(zeros(size(@show d)),)
 
 # Hyperwell
-
+#=
 function hyperproblem(n=2; h=.1, beta=5.)
     a = ones(n)
     b = ones(n)
     b[1] = -1
     CommittorSmoothBoundary(hyperwell, h, beta, a, b, 30.)
-end
+end =#
 
 hyperwell(x) = 0.1*sum((x.^2 .-1).^2, dims=1)
 
