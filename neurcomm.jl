@@ -11,48 +11,6 @@ import Flux.Zygote.dropgrad
 import Flux.Zygote.@adjoint
 
 
-### learning core
-
-#=
-function train(batch=100, epochs=1000;
-    c = defaultproblem(),
-    model = defaultmodel(c),
-    opt = ADAM(0.01),
-    plotevery=Inf)
-
-
-    ps = Flux.params(model)
-    losshist = []
-
-    for i in 1:epochs
-        x = sample(c, batch)
-
-        local pointlosses
-
-        l, pb = Flux.pullback(ps) do
-            pointlosses = losses(c, model, x)
-            sum(abs2, pointlosses) / size(x, 2)
-        end
-        #@show losses
-        push!(losshist, l)
-        println(l)
-        grad = pb(1)
-        Flux.Optimise.update!(opt, ps, grad)
-
-
-        if i % plotevery == 0
-            maxloss = max(maximum(pointlosses))
-            p1 = plot(model, c)# |> display
-            #p1 = Plots.scatter!(x[1,:], x[2,:], legend=false,
-            #    marker=((pointlosses' / maxloss).^(1/1) * 10, stroke(0)))
-            p2 = Plots.plot(losshist, yscale=:log10)
-            Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
-        end
-    end
-    model
-end
-=#
-
 ### plotting
 
 dim(m::Flux.Chain) = size(m.layers[1].W, 2)
@@ -75,11 +33,6 @@ function plot(m, bounds, nx=40, ny=30)
     heatmap(xs, ys, zs)
     contour!(xs, ys, zs, linewidth=2)
 end
-
-### Models
-
-
-
 
 ### Boundary Types
 
@@ -181,9 +134,13 @@ struct CommittorSampled{B}
     boundary::B
 end
 
-function losses(c::CommittorSampled, f, data)
-    fb = boundaryfixture(c.boundary, f)
+SampledData = Array{<:Tuple{<:Vector,<:Matrix}}
 
+SampledDataTensor = Array{<:Matrix}
+
+# old tuple version, whilst evaluation is only slightly slower, the pullback is 4x slower
+function losses(c::CommittorSampled, f, data::D) where D <: SampledData
+    fb = boundaryfixture(c.boundary, f)
     losses = [sampleloss(fb, d[1], d[2]) for d in data]'
 
     # weight losses only inside the solution domain
@@ -191,6 +148,20 @@ function losses(c::CommittorSampled, f, data)
     _, _, r = getboundary(c.boundary, xs)
     losses = losses .* r
 end
+
+
+function losses(c::CommittorSampled, f, data::Array{T, 3}) where T
+    f = boundaryfixture(c.boundary, f)
+    (i,j,k) = size(data)
+    xs = reshape(data, i, j*k)
+    ys = reshape(f(xs), j, k)
+
+    losses = abs.(mean(ys[1,:]' .- ys[2:end,:], dims=1))
+
+    _, _, r = getboundary(c.boundary, data[:,1,:])
+    losses .* r
+end
+
 
 function sampleloss(f, x, ys)
     abs(mean(f(x) .- f(ys)))
@@ -243,7 +214,7 @@ function train(model, c, data;
     losshist = []
 
     for i in 1:epochs
-        for (j,x) in enumerate(Flux.Data.DataLoader(data, batchsize=batch))
+        for x in Flux.Data.DataLoader(data, batchsize=batch)
             local pointlosses
 
             l, pb = Flux.pullback(ps) do
@@ -257,13 +228,21 @@ function train(model, c, data;
             Flux.Optimise.update!(opt, ps, grad)
 
 
-            if j % plotevery == 0
+            if length(losshist) % plotevery == 0
                 maxloss = max(maximum(pointlosses))
                 p1 = plot(model, bounds)# |> display
                 #Plots.plot()
                 if isa(x,Matrix{Float64})
                     p1 = Plots.scatter!(x[1,:], x[2,:], legend=false,
                         marker=((pointlosses' / maxloss).^(1/1) * 10, stroke(0)))
+                elseif isa(x, SampledData)
+                    for tup in x
+                        x, ys = tup
+                        Plots.scatter!([x[1]], [x[2]])
+                        for y in eachcol(ys)
+                            Plots.plot!([x[1],y[1]], [x[2], y[2]], legend=false)
+                        end
+                    end
                 end
                 p2 = Plots.plot(losshist, yscale=:log10)
                 Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
@@ -273,7 +252,57 @@ function train(model, c, data;
     model
 end
 
+import Zygote.gradient
 
+eulermaruyamastep(x, force, sigma, dt) = x .+  force * dt .+ sigma * randn(size(x)) * sqrt(dt)
+
+function eulermaruyama(x, potential, sigma, dt, n)
+    for i in 1:n
+        x = eulermaruyamastep(x, -gradient(potential, x)[1], sigma, dt)
+    end
+    x
+end
+
+struct RandomData{T}
+    generator::T
+end
+
+function Flux.Data.DataLoader(d::RandomData; batchsize=1)
+    [d.generator(batchsize)]
+end
+
+
+
+
+
+using Parameters
+
+@with_kw struct Potential2D
+    r = .1
+    box = [-3. 3; -2 2]
+    emsigma = .1
+end
+
+potential(::Potential2D) = triplewell
+box(t::Potential2D) = t.box
+boundary(t::Potential2D) = RadialCrisp([1.,0],[-1.,0], t.r)
+sample(t::Potential2D, n) = randbox(t.box, n)
+randdata(t::Potential2D, branches, dt, steps) = RandomData(n->sampletrajectories(t, n, branches, dt=dt, steps=steps))
+
+function sampletrajectories(t::Potential2D, n, m; dt=1, steps=1)
+    xs = sample(t, n)
+    u = potential(t)
+    sigma = t.emsigma
+    [(collect(x), hcat([eulermaruyama(x, u, sigma, dt, steps) for i in 1:m]...)) for x in eachcol(xs)]
+end
+
+function test(p::Potential2D; hidden=[10,10], samples=100, branches=1, plotevery=1, dt=.1, steps=10, epochs=10)
+    model = mlp(hidden)
+    c = CommittorSampled(boundary(p))
+    #data = sampletrajectories(p, samples, branches, dt=dt, steps=steps)
+    data = randdata(p, branches, dt, steps)
+    train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=samples, epochs=epochs)
+end
 
 
 #=
