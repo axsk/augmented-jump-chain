@@ -146,6 +146,19 @@ function losses(c::CommittorSampled, f, data::Array{T, 3}) where T
     losses .* r
 end
 
+## Variational Committor
+
+struct CommittorVariational{B}
+    boundary::B
+end
+
+function losses(c::CommittorVariational, f, data::Matrix)
+    f = boundaryfixture(c.boundary, f)
+    mapslices(data, dims=1) do d
+        sqrt(sum(abs2, Flux.gradient(x->f(x)[1], d)[1])) # TODO check if its right
+    end
+end
+
 #### utility
 
 function randbox(bounds, n)
@@ -167,13 +180,14 @@ end
 using Parameters
 
 @with_kw struct Potential2D
-    potential = triplewell
-    boundary = RadialCrisp([1.,0],[-1.,0], t.r)
-    box = [-3. 3; -2 2]
+    potential
+    boundary
+    box
     emsigma = .1
 end
 
-potential(p::Potential2D) = p.triplewell
+
+potential(p::Potential2D) = p.potential
 box(t::Potential2D) = t.box
 boundary(t::Potential2D) = t.boundary
 sample(t::Potential2D, n) = randbox(t.box, n)
@@ -205,7 +219,7 @@ function test_sqra(;hidden=[10,10], h=.1, beta=5., r=.1, samples=100, plotevery=
     train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=samples, epochs=epochs)
 end
 
-function test_sampled(p::Potential2D = Potential2D(); hidden=[10,10], samples=100, branches=4, plotevery=10, dt=.1, steps=1, epochs=1000)
+function test_sampled(p::Potential2D = Triplewell(); hidden=[10,10], samples=100, branches=4, plotevery=10, dt=.1, steps=1, epochs=1000)
     model = mlp(hidden)
     c = CommittorSampled(boundary(p))
     #data = sampletrajectories(p, samples, branches, dt=dt, steps=steps)
@@ -302,11 +316,7 @@ export train
 
 # concrete models
 
-#defaultproblem() = TriplewellCrisp()
-
-# Mullerbrown
-MullerBrown() = CommittorSQRA(mullerbrown, .1, 5, RadialCrisp([0.6,0], [-0.55,1.4], .1))
-#, mullerbrownbox)
+MullerBrown() = Potential2D(potential=mullerbrown, boundary = RadialCrisp([0.6,0], [-0.55,1.4], .1), box=mullerbrownbox)
 
 const mullerbrownbox = [-1.5 1; -.5 2]
 function mullerbrown(x::AbstractMatrix)
@@ -325,9 +335,8 @@ mullerbrown(x::AbstractVector) = mullerbrown(reshape(x, (2,1)))[1]
 mullerbrown(x, y) = mullerbrown([x,y])
 
 ## Triplewell
-#TriplewellCrisp() = CommittorCrispBoundary(triplewell, 0.1, 5., triplewellbnd, 2, triplewellbox)
 
-#TriplewellSmooth() = CommittorSmoothBoundary(triplewell, 0.1, 5., [1.,0], [-1.,0], 30., triplewellbox)
+Triplewell() = Potential2D(triplewell, RadialCrisp([1.,0],[-1.,0], .1), triplewellbox, .1)
 
 const triplewellbox = [-3. 3; -2 2]
 
