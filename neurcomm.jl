@@ -146,6 +146,7 @@ function losses(c::CommittorSampled, f, data::Array{T, 3}) where T
     losses .* r
 end
 
+#### utility
 
 function randbox(bounds, n)
     shift = bounds[:,2]
@@ -162,6 +163,38 @@ function mlp(x, in=2, sig=false)
     end
     Chain(first, [Dense(x[i], x[i+1], σ) for i=1:length(x)-1]..., last)
 end
+
+using Parameters
+
+@with_kw struct Potential2D
+    potential = triplewell
+    boundary = RadialCrisp([1.,0],[-1.,0], t.r)
+    box = [-3. 3; -2 2]
+    emsigma = .1
+end
+
+potential(p::Potential2D) = p.triplewell
+box(t::Potential2D) = t.box
+boundary(t::Potential2D) = t.boundary
+sample(t::Potential2D, n) = randbox(t.box, n)
+randdata(t::Potential2D, branches, dt, steps) = RandomData(n->sampletrajectories(t, n, branches, dt=dt, steps=steps))
+
+function sampletrajectories(t::Potential2D, n, m; dt=1, steps=1)
+    xs = sample(t, n)
+    u = potential(t)
+    sigma = t.emsigma
+    data = zeros(2, m+1, n)
+    for i in 1:n
+        x = xs[:,i]
+        data[:, 1, i] = x
+        for j in 1:m
+            data[:, 1+j, i] = eulermaruyama(x, u, sigma, dt, steps)
+        end
+    end
+    data
+end
+
+
 
 
 function test_sqra(;hidden=[10,10], h=.1, beta=5., r=.1, samples=100, plotevery=10, epochs=1000)
@@ -208,22 +241,26 @@ function train(model, c, data;
 
 
             if length(losshist) % plotevery == 0
-                maxloss = max(maximum(pointlosses))
-                p1 = plot(model, bounds)
-                if isa(x,Matrix{Float64})
-                    p1 = Plots.scatter!(x[1,:], x[2,:], legend=false,
-                        marker=((pointlosses' / maxloss) * 10, stroke(0)))
-                elseif isa(x, Array{T,3} where T)
-                    Plots.scatter!(x[1,1,:], x[2,1,:], legend=false,
-                        marker=((pointlosses' / maxloss) * 10, stroke(0)))
-                    plottrajs(x[:,:,1:20])
-                end
-                p2 = Plots.plot(losshist, yscale=:log10)
-                Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
+                visualize(model, bounds, pointlosses, x, losshist)
             end
         end
     end
     model
+end
+
+function visualize(model, bounds, pointlosses, x, losshist)
+    maxloss = max(maximum(pointlosses))
+    p1 = plot(model, bounds)
+    if isa(x,Matrix{Float64})
+        p1 = Plots.scatter!(x[1,:], x[2,:], legend=false,
+            marker=((pointlosses' / maxloss) * 10, stroke(0)))
+    elseif isa(x, Array{T,3} where T)
+        Plots.scatter!(x[1,1,:], x[2,1,:], legend=false,
+            marker=((pointlosses' / maxloss) * 10, stroke(0)))
+        plottrajs(x[:,:,1:20])
+    end
+    p2 = Plots.plot(losshist, yscale=:log10)
+    Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
 end
 
 function plottrajs(data)
@@ -258,36 +295,6 @@ function Flux.Data.DataLoader(d::RandomData; batchsize=1)
     [d.generator(batchsize)]
 end
 
-
-using Parameters
-
-@with_kw struct Potential2D
-    potential = triplewell
-    boundary = RadialCrisp([1.,0],[-1.,0], t.r)
-    box = [-3. 3; -2 2]
-    emsigma = .1
-end
-
-potential(p::Potential2D) = p.triplewell
-box(t::Potential2D) = t.box
-boundary(t::Potential2D) = t.boundary
-sample(t::Potential2D, n) = randbox(t.box, n)
-randdata(t::Potential2D, branches, dt, steps) = RandomData(n->sampletrajectories(t, n, branches, dt=dt, steps=steps))
-
-function sampletrajectories(t::Potential2D, n, m; dt=1, steps=1)
-    xs = sample(t, n)
-    u = potential(t)
-    sigma = t.emsigma
-    data = zeros(2, m+1, n)
-    for i in 1:n
-        x = xs[:,i]
-        data[:, 1, i] = x
-        for j in 1:m
-            data[:, 1+j, i] = eulermaruyama(x, u, sigma, dt, steps)
-        end
-    end
-    data
-end
 
 
 
