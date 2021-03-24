@@ -134,22 +134,6 @@ struct CommittorSampled{B}
     boundary::B
 end
 
-SampledData = Array{<:Tuple{<:Vector,<:Matrix}}
-
-SampledDataTensor = Array{<:Matrix}
-
-# old tuple version, whilst evaluation is only slightly slower, the pullback is 4x slower
-function losses(c::CommittorSampled, f, data::D) where D <: SampledData
-    fb = boundaryfixture(c.boundary, f)
-    losses = [sampleloss(fb, d[1], d[2]) for d in data]'
-
-    # weight losses only inside the solution domain
-    xs = hcat((d[1] for d in data)...) :: Matrix{Float64} # TODO find typestable+ad-able
-    _, _, r = getboundary(c.boundary, xs)
-    losses = losses .* r
-end
-
-
 function losses(c::CommittorSampled, f, data::Array{T, 3}) where T
     f = boundaryfixture(c.boundary, f)
     (i,j,k) = size(data)
@@ -162,10 +146,6 @@ function losses(c::CommittorSampled, f, data::Array{T, 3}) where T
     losses .* r
 end
 
-
-function sampleloss(f, x, ys)
-    abs(mean(f(x) .- f(ys)))
-end
 
 function randbox(bounds, n)
     shift = bounds[:,2]
@@ -184,20 +164,20 @@ function mlp(x, in=2, sig=false)
 end
 
 
-function test_sqra(;hidden=[10,10], h=.1, beta=5., r=.1, samples=10_000, batch=100, plotevery=10, epochs=10)
+function test_sqra(;hidden=[10,10], h=.1, beta=5., r=.1, samples=100, plotevery=10, epochs=1000)
     model = NN.mlp(hidden)
     c = CommittorSQRA(triplewell, h, beta, RadialCrisp([1,0],[-1,0], r))
-    data = randbox(triplewellbox, samples)
-    train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=batch, epochs=epochs)
+    #data = randbox(triplewellbox, samples)
+    data = RandomData(n->randbox(triplewellbox, n))#sampletrajectories(t, n, branches, dt=dt, steps=steps))
+    train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=samples, epochs=epochs)
 end
 
-function test_sampled(;hidden=[10,10], r=.1, samples=1_000, trajs=100, batch=1000, plotevery=10)
+function test_sampled(p::Potential2D = Potential2D(); hidden=[10,10], samples=100, branches=4, plotevery=10, dt=.1, steps=1, epochs=1000)
     model = mlp(hidden)
-    c = CommittorSampled(RadialCrisp([1,0],[-1,0], r))
-    xs = randbox(triplewellbox, samples)
-
-    data = [(collect(x), x.+randn(2,trajs) *.1) for x in eachcol(xs)]
-    train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=batch)
+    c = CommittorSampled(boundary(p))
+    #data = sampletrajectories(p, samples, branches, dt=dt, steps=steps)
+    data = randdata(p, branches, dt, steps)
+    train(model, c, data, bounds=p.box, plotevery=plotevery, batch=samples, epochs=epochs)
 end
 
 
@@ -221,7 +201,6 @@ function train(model, c, data;
                 pointlosses = losses(c, model, x)
                 sum(abs2, pointlosses) / size(x, 2)
             end
-            #@show losses
             push!(losshist, l)
             println(l)
             grad = pb(1)
@@ -230,19 +209,14 @@ function train(model, c, data;
 
             if length(losshist) % plotevery == 0
                 maxloss = max(maximum(pointlosses))
-                p1 = plot(model, bounds)# |> display
-                #Plots.plot()
+                p1 = plot(model, bounds)
                 if isa(x,Matrix{Float64})
                     p1 = Plots.scatter!(x[1,:], x[2,:], legend=false,
-                        marker=((pointlosses' / maxloss).^(1/1) * 10, stroke(0)))
-                elseif isa(x, SampledData)
-                    for tup in x
-                        x, ys = tup
-                        Plots.scatter!([x[1]], [x[2]])
-                        for y in eachcol(ys)
-                            Plots.plot!([x[1],y[1]], [x[2], y[2]], legend=false)
-                        end
-                    end
+                        marker=((pointlosses' / maxloss) * 10, stroke(0)))
+                elseif isa(x, Array{T,3} where T)
+                    Plots.scatter!(x[1,1,:], x[2,1,:], legend=false,
+                        marker=((pointlosses' / maxloss) * 10, stroke(0)))
+                    plottrajs(x[:,:,1:20])
                 end
                 p2 = Plots.plot(losshist, yscale=:log10)
                 Plots.plot(p1, p2, layout=@layout([a;b]), size=(800,800)) |> display
@@ -252,13 +226,26 @@ function train(model, c, data;
     model
 end
 
+function plottrajs(data)
+    _, n, m = size(data)
+    x = zeros(2, (n-1)*m)
+    x[1,:] = repeat(data[1,1,:], inner=n-1)
+    x[2,:] = data[1,2:n,:]
+
+    y = zeros(2, (n-1)*m)
+    y[1,:] = repeat(data[2,1,:], inner=n-1)
+    y[2,:] = data[2,2:n,:]
+
+    Plots.plot!(x, y, legend=false, color=:dodgerblue)
+end
+
+
 import Zygote.gradient
 
-eulermaruyamastep(x, force, sigma, dt) = x .+  force * dt .+ sigma * randn(size(x)) * sqrt(dt)
-
-function eulermaruyama(x, potential, sigma, dt, n)
-    for i in 1:n
-        x = eulermaruyamastep(x, -gradient(potential, x)[1], sigma, dt)
+function eulermaruyama(x, potential, sigma, dt, steps)
+    for i in 1:steps
+        force = -gradient(potential, x)[1]
+        x .+=  force * dt .+ sigma * randn(size(x)) * sqrt(dt)
     end
     x
 end
@@ -272,20 +259,18 @@ function Flux.Data.DataLoader(d::RandomData; batchsize=1)
 end
 
 
-
-
-
 using Parameters
 
 @with_kw struct Potential2D
-    r = .1
+    potential = triplewell
+    boundary = RadialCrisp([1.,0],[-1.,0], t.r)
     box = [-3. 3; -2 2]
     emsigma = .1
 end
 
-potential(::Potential2D) = triplewell
+potential(p::Potential2D) = p.triplewell
 box(t::Potential2D) = t.box
-boundary(t::Potential2D) = RadialCrisp([1.,0],[-1.,0], t.r)
+boundary(t::Potential2D) = t.boundary
 sample(t::Potential2D, n) = randbox(t.box, n)
 randdata(t::Potential2D, branches, dt, steps) = RandomData(n->sampletrajectories(t, n, branches, dt=dt, steps=steps))
 
@@ -293,51 +278,16 @@ function sampletrajectories(t::Potential2D, n, m; dt=1, steps=1)
     xs = sample(t, n)
     u = potential(t)
     sigma = t.emsigma
-    [(collect(x), hcat([eulermaruyama(x, u, sigma, dt, steps) for i in 1:m]...)) for x in eachcol(xs)]
-end
-
-function test(p::Potential2D; hidden=[10,10], samples=100, branches=1, plotevery=1, dt=.1, steps=10, epochs=10)
-    model = mlp(hidden)
-    c = CommittorSampled(boundary(p))
-    #data = sampletrajectories(p, samples, branches, dt=dt, steps=steps)
-    data = randdata(p, branches, dt, steps)
-    train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=samples, epochs=epochs)
-end
-
-
-#=
-
-defaultmodel(c::Committorproblem) = Chain(Dense(dim(c), 10, σ), Dense(10, 10, σ), Dense(10, 1, σ))
-sample(c::Committorproblem, n) = samplebox(c.bounds, n)
-dim(c::Committorproblem) = size(c.bounds, 1)
-
-
-
-
-
-dim(c::CommittorSampled) = size(c.bounds, 1)
-
-getboundary(c::CommittorSampled, x) = getboundary(c.boundary, x)
-
-function sample(c::CommittorSampled, n)
-    d = []
+    data = zeros(2, m+1, n)
     for i in 1:n
-        x = samplebox(c.bounds, 1)[:,1]
-        ys = x .+ randn(dim(c), 20) / 10
-        push!(d, (x,ys))
+        x = xs[:,i]
+        data[:, 1, i] = x
+        for j in 1:m
+            data[:, 1+j, i] = eulermaruyama(x, u, sigma, dt, steps)
+        end
     end
-    d
+    data
 end
-
-function test()
-    #boundary = Crispboundary(NN.triplewellbnd)#
-    boundary = RadialCrisp([-.5, 0], [.5, 0], .1)
-    data=[[1,2]]
-    sp = CommittorSampled(boundary, data, [-1 1; -1 1])
-    train(c=sp, plotevery=10)
-end
-
-=#
 
 
 
