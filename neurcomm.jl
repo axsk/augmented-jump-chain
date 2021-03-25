@@ -14,6 +14,7 @@ import Flux.Zygote.@adjoint
 ### plotting
 
 dim(m::Flux.Chain) = size(m.layers[1].W, 2)
+dim(m) = 2
 
 function plot(m, bounds, nx=40, ny=30)
     xs = range(bounds[1,:]..., length = nx)
@@ -153,55 +154,14 @@ struct CommittorVariational{B,R}
     reweight::R # dpi/dx
 end
 
-import Zygote.@showgrad
-
-function losses(c::CommittorVariational, f, data::Matrix)
+function losses(c::CommittorVariational, f, x::Matrix)
     f = boundaryfixture(c.boundary, f)
-    #[begin
-        #d=data[:,i]
-        #d=data
-
-        #r = c.reweight(d)
-        #@showgrad r
-        #s = sum(abs2, Flux.gradient(x->f(x)[1], d)[1]) * r
-        #@showgrad r
-
-        #s=g[1]
-        #@showgrad s = sum(abs2, g)
-    #    @showgrad s = g[1]
-    #end for i in 1:size(data,2)]
-    #mapslices(data, dims=1) do d
-    #    r = c.reweight(d)
-    #    sum(abs2, Flux.gradient(x->f(x)[1], d)[1]) * r
-    #end
-    d = rand(1,2)
-    @showgrad @show  g = Flux.gradient(x->f(x)[1], d)[1]
-
+    y, pb = Flux.pullback(f, x)
+    dx, = pb(ones(size(x,2))')
+    l2 = sum(abs2, dx, dims=1)
+    r = c.reweight(x)
+    l2 .* r'
 end
-
-function mygrad(f, x)
-    sum(abs2, ReverseDiff.gradient(f, x))
-end
-@adjoint mygrad(f, x) = mygrad(f,x), d->(@show pullback(f, x)[2](d), mygradrevdiff(f, x))
-
-using ReverseDiff
-function mygradrevdiff(f, x)
-    ReverseDiff.gradient(x->mygrad(f,x), x)
-end
-
-function dmygraddf(f,x)
-    theta0, u_from_theta = Flux.destructure(f)
-    ReverseDiff.gradient(theta0) do theta0
-        u = u_from_theta(theta0)
-        mygrad(u, x)
-    end
-end
-
-Flux.pullback(Flux.params(m)) do
-    mygrad(m, x)
-    end[2](1).grads
-
-
 
 #### utility
 
@@ -231,7 +191,7 @@ using Parameters
 end
 
 
-CommittorVariational(L::Langevin) = CommittorVariational(L.boundary, x -> exp(-L.beta * L.potential(x)))
+CommittorVariational(L::Langevin) = CommittorVariational(L.boundary, x -> exp.(-L.beta * L.potential(x)))
 CommittorSampled(L::Langevin) = CommittorSampled(L.boundary)
 
 # dirty workaround
@@ -304,16 +264,17 @@ function train(model, c, data;
 
             l, pb = Flux.pullback(ps) do
                 pointlosses = losses(c, model, x)
-                sum(abs2, pointlosses) / size(x, 2)
+                sum(pointlosses)
+                #sum(abs2, pointlosses) / size(x, 2)
             end
             push!(losshist, l)
             println(l)
             grad = pb(1)
             Flux.Optimise.update!(opt, ps, grad)
 
-
+            fm = boundaryfixture(c.boundary, model)
             if length(losshist) % plotevery == 0
-                visualize(model, bounds, pointlosses, x, losshist)
+                visualize(fm, bounds, pointlosses, x, losshist)
             end
         end
     end
@@ -321,7 +282,7 @@ function train(model, c, data;
 end
 
 function visualize(model, bounds, pointlosses, x, losshist)
-    maxloss = max(maximum(pointlosses))
+    maxloss = maximum(pointlosses)
     p1 = plot(model, bounds)
     if isa(x,Matrix{Float64})
         p1 = Plots.scatter!(x[1,:], x[2,:], legend=false,
