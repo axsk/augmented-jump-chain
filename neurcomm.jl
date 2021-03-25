@@ -148,16 +148,60 @@ end
 
 ## Variational Committor
 
-struct CommittorVariational{B}
+struct CommittorVariational{B,R}
     boundary::B
+    reweight::R # dpi/dx
 end
+
+import Zygote.@showgrad
 
 function losses(c::CommittorVariational, f, data::Matrix)
     f = boundaryfixture(c.boundary, f)
-    mapslices(data, dims=1) do d
-        sqrt(sum(abs2, Flux.gradient(x->f(x)[1], d)[1])) # TODO check if its right
+    #[begin
+        #d=data[:,i]
+        #d=data
+
+        #r = c.reweight(d)
+        #@showgrad r
+        #s = sum(abs2, Flux.gradient(x->f(x)[1], d)[1]) * r
+        #@showgrad r
+
+        #s=g[1]
+        #@showgrad s = sum(abs2, g)
+    #    @showgrad s = g[1]
+    #end for i in 1:size(data,2)]
+    #mapslices(data, dims=1) do d
+    #    r = c.reweight(d)
+    #    sum(abs2, Flux.gradient(x->f(x)[1], d)[1]) * r
+    #end
+    d = rand(1,2)
+    @showgrad @show  g = Flux.gradient(x->f(x)[1], d)[1]
+
+end
+
+function mygrad(f, x)
+    sum(abs2, ReverseDiff.gradient(f, x))
+end
+@adjoint mygrad(f, x) = mygrad(f,x), d->(@show pullback(f, x)[2](d), mygradrevdiff(f, x))
+
+using ReverseDiff
+function mygradrevdiff(f, x)
+    ReverseDiff.gradient(x->mygrad(f,x), x)
+end
+
+function dmygraddf(f,x)
+    theta0, u_from_theta = Flux.destructure(f)
+    ReverseDiff.gradient(theta0) do theta0
+        u = u_from_theta(theta0)
+        mygrad(u, x)
     end
 end
+
+Flux.pullback(Flux.params(m)) do
+    mygrad(m, x)
+    end[2](1).grads
+
+
 
 #### utility
 
@@ -179,24 +223,32 @@ end
 
 using Parameters
 
-@with_kw struct Potential2D
+@with_kw struct Langevin
     potential
     boundary
     box
-    emsigma = .1
+    beta
 end
 
 
-potential(p::Potential2D) = p.potential
-box(t::Potential2D) = t.box
-boundary(t::Potential2D) = t.boundary
-sample(t::Potential2D, n) = randbox(t.box, n)
-randdata(t::Potential2D, branches, dt, steps) = RandomData(n->sampletrajectories(t, n, branches, dt=dt, steps=steps))
+CommittorVariational(L::Langevin) = CommittorVariational(L.boundary, x -> exp(-L.beta * L.potential(x)))
+CommittorSampled(L::Langevin) = CommittorSampled(L.boundary)
 
-function sampletrajectories(t::Potential2D, n, m; dt=1, steps=1)
+# dirty workaround
+CommittorSQRA(h::Number) = L::Langevin -> CommittorSQRA(L.potential, h, L.beta, L.boundary)
+
+
+potential(p::Langevin) = p.potential
+box(t::Langevin) = t.box
+boundary(t::Langevin) = t.boundary
+sample(t::Langevin, n) = randbox(t.box, n)
+randdata(t::Langevin, branches, dt, steps) = RandomData(n->sampletrajectories(t, n, branches, dt=dt, steps=steps))
+randuniform(t::Langevin) = RandomData(n->sample(t, n))
+
+function sampletrajectories(t::Langevin, n, m; dt=1, steps=1)
     xs = sample(t, n)
     u = potential(t)
-    sigma = t.emsigma
+    sigma = sqrt(2/t.beta)
     data = zeros(2, m+1, n)
     for i in 1:n
         x = xs[:,i]
@@ -219,7 +271,7 @@ function test_sqra(;hidden=[10,10], h=.1, beta=5., r=.1, samples=100, plotevery=
     train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=samples, epochs=epochs)
 end
 
-function test_sampled(p::Potential2D = Triplewell(); hidden=[10,10], samples=100, branches=4, plotevery=10, dt=.1, steps=1, epochs=1000)
+function test_sampled(p::Langevin = Triplewell(); hidden=[10,10], samples=100, branches=4, plotevery=10, dt=.1, steps=1, epochs=1000)
     model = mlp(hidden)
     c = CommittorSampled(boundary(p))
     #data = sampletrajectories(p, samples, branches, dt=dt, steps=steps)
@@ -227,6 +279,12 @@ function test_sampled(p::Potential2D = Triplewell(); hidden=[10,10], samples=100
     train(model, c, data, bounds=p.box, plotevery=plotevery, batch=samples, epochs=epochs)
 end
 
+function test_variational(process::Langevin = Triplewell(); hidden=[10,10], samples=100, plotevery=10, epochs=10)
+    model = NN.mlp(hidden)
+    c = CommittorVariational(process)
+    data = randuniform(process)
+    train(model, c, data, bounds=process.box, plotevery=plotevery, batch=samples, epochs=epochs)
+end
 
 
 function train(model, c, data;
@@ -316,7 +374,7 @@ export train
 
 # concrete models
 
-MullerBrown() = Potential2D(potential=mullerbrown, boundary = RadialCrisp([0.6,0], [-0.55,1.4], .1), box=mullerbrownbox)
+MullerBrown() = Langevin(potential=mullerbrown, boundary = RadialCrisp([0.6,0], [-0.55,1.4], .1), box=mullerbrownbox)
 
 const mullerbrownbox = [-1.5 1; -.5 2]
 function mullerbrown(x::AbstractMatrix)
@@ -336,7 +394,7 @@ mullerbrown(x, y) = mullerbrown([x,y])
 
 ## Triplewell
 
-Triplewell() = Potential2D(triplewell, RadialCrisp([1.,0],[-1.,0], .1), triplewellbox, .1)
+Triplewell() = Langevin(triplewell, RadialCrisp([1.,0],[-1.,0], .1), triplewellbox, .1)
 
 const triplewellbox = [-3. 3; -2 2]
 
