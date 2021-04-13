@@ -163,6 +163,54 @@ function losses(c::CommittorVariational, f, x::Matrix)
     l2 .* r'
 end
 
+using ForwardDiff
+
+function losses_f(c::CommittorVariational, f, x::Matrix)
+    f = boundaryfixture(c.boundary, f)
+    df = map(eachcol(x)) do x
+        ForwardDiff.gradient(x->f(x)[1], x) end
+    df = hcat(df...)
+    l2 = sum(abs2, df, dims=1)
+    r = c.reweight(x)
+    l2 .* r'
+end
+
+import FiniteDifferences
+
+function test_losses_variational()
+    p = Langevin(triplewell, RadialExp([1.,0],[-1.,0], -10.), triplewellbox, 5)
+    c = CommittorVariational(p)
+    m = mlp([10,10])
+    x = rand(2,10)
+
+    @assert isapprox(losses(c,m,x), losses_f(c,m,x); rtol=1e-6)
+
+    p, builder = Flux.destructure(m)
+    fp(p) = sum(abs2, losses(c, builder(p), x))
+
+    # 2x back
+    ps = Flux.params(m)
+    l1, pb = Flux.pullback(ps) do
+        sum(abs2, losses(c, m, x))
+    end
+    df1 = pb(1).grads[m[1].W]
+
+    # forward-back
+    df2 = ForwardDiff.gradient(fp, p)
+    l2  = sum(abs2, losses_f(c, m, x))
+
+    # 2x back with destructure
+    l3, pb3 = Flux.pullback(fp, p)
+    df3 = pb3(1)[1]
+
+    df4 = FiniteDifferences.grad(FiniteDifferences.central_fdm(5,1), fp, p)[1]
+
+    @assert df1[1] == df2[1] == df3[1]
+    df1, df2, df3, df4 , l1, l2, l3
+end
+#df1, df2, df3, df4, l1, l2, l3 = NN.test_losses_variational();
+
+
 #### utility
 
 function randbox(bounds, n)
