@@ -264,8 +264,8 @@ function train(model, c, data;
 
             l, pb = Flux.pullback(ps) do
                 pointlosses = losses(c, model, x)
-                sum(pointlosses)
-                #sum(abs2, pointlosses) / size(x, 2)
+                #sum(pointlosses)
+                sum(abs2, pointlosses) / size(x, 2)
             end
             push!(losshist, l)
             println(l)
