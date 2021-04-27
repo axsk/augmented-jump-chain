@@ -10,16 +10,27 @@ import Flux.Zygote.hook
 import Flux.Zygote.dropgrad
 import Flux.Zygote.@adjoint
 
+export test_variational
+export test_sampled
+export test_sqra
+
+export Langevin
+export triplewell, Triplewell, triplewellbox
+export RadialCrisp, RadialExp
+export CommittorSampled, CommittorSQRA, CommittorVariational
+
+export losses
+export randuniform
 
 ### plotting
 
 dim(m::Flux.Chain) = size(m.layers[1].W, 2)
 dim(m) = 2
 
-function plot(m, bounds, nx=40, ny=30)
+function boxgrid(bounds, nx=40, ny=30)
     xs = range(bounds[1,:]..., length = nx)
     ys = range(bounds[2,:]..., length = ny)
-    zs = zeros(dim(m), length(xs) * length(ys))
+    zs = zeros(2, length(xs) * length(ys))
 
     i=1
     for y in ys
@@ -30,9 +41,16 @@ function plot(m, bounds, nx=40, ny=30)
         end
     end
 
+    xs, ys, zs
+end
+
+
+function plot(m, bounds, nx=40, ny=30)
+    xs, ys, zs = boxgrid(bounds, nx, ny)
+
     zs = reshape(m(zs), length(xs), length(ys))'
     heatmap(xs, ys, zs)
-    contour!(xs, ys, zs, linewidth=2)
+    contour!(xs, ys, zs, linewidth=2), grid
 end
 
 ### Boundary Types
@@ -154,13 +172,100 @@ struct CommittorVariational{B,R}
     reweight::R # dpi/dx
 end
 
+getboundary(c::RadialExp, x) = smoothboundary(c.a, c.b, c.e, x)
+function smoothboundary(a, b, e, x)
+
+    a, b, r
+end
+
+using Flux
+import Zygote
+import Zygote.@showgrad
+
+function mwe1(n=1)
+    a = ones(1) * 0
+    b = ones(1) * .5
+    data = ones(1,n)
+
+    function loss(x)
+        y, pb = Zygote.pullback(x) do x
+            @showgrad aa = sum(x->(x^2), x .- a, dims=1)
+            @showgrad bb = sum(x->(x^2), x .- b, dims=1)
+            @showgrad(aa = aa .+ 0)
+            @showgrad(bb = aa .+ 0)
+            @showgrad r = ones(1,n) - @showgrad(aa)
+            @showgrad s = r - bb
+        end
+        dfdx,  = pb(ones(1,n))
+        dfdx
+    end
+
+    @show l1 = sum(loss(data))
+
+    #z = rand(2)
+
+    l2, pb = Zygote.pullback(rand(3)) do z
+        @show sum(loss(data)) # inside do block
+    end
+    @show l2
+
+    @assert l1 == l2
+end
+
+#mwe1()
+
+function mwe()
+    a = 0
+    b = .5
+    data = 1.0
+
+    function loss()
+        y, pb = Zygote.pullback(data) do x
+            @showgrad aa = abs2(x - a)
+            @showgrad bb = abs2(x - b)
+            @showgrad r = 1 - aa - bb
+        end
+        @showgrad dfdx,  = pb(data)
+        dfdx
+    end
+
+    l1 = sum(loss())
+    @show l1
+
+    l2, pb = Zygote.pullback() do
+        @showgrad sum(loss())
+    end
+
+    @show l1, l2
+    @assert l1 == l2
+end
+
 function losses(c::CommittorVariational, f, x::Matrix)
-    f = boundaryfixture(c.boundary, f)
-    y, pb = Flux.pullback(f, x)
-    dx, = pb(ones(size(x,2))')
+    #f = boundaryfixture(c.boundary, f)
+    y, pb = Flux.pullback(x) do x
+        bnd = c.boundary
+        #a = exp.(bnd.e * sum(abs2, x .- bnd.a, dims=1)) # set a with bnd = 1
+        #b = exp.(bnd.e * sum(abs2, x .- bnd.b, dims=1)) # set b with bnd = 0
+        #a = exp.(bnd.e * sum(abs2, x .- bnd.a, dims=1))
+        @show bnd.a
+        a = sum(abs2, x .- bnd.a, dims=1)
+        b = sum(abs2, x .- bnd.b, dims=1)
+        #a = .1
+        r = 1 .- (a .+ b)# + b)
+        1 .* r .+ a
+        @show size(r)
+        r
+
+    end
+    #@show sum(y)
+    dx, = pb(ones(1,size(x,2)))
+    @show sum(dx)
     l2 = sum(abs2, dx, dims=1)
-    r = c.reweight(x)
-    l2 .* r'
+    #@show sum(l2)
+    l2
+    #r = c.reweight(x)
+    #@show size(l2), size(r)
+    #l2 .* r'
 end
 
 using ForwardDiff
@@ -287,38 +392,53 @@ function test_sampled(p::Langevin = Triplewell(); hidden=[10,10], samples=100, b
     train(model, c, data, bounds=p.box, plotevery=plotevery, batch=samples, epochs=epochs)
 end
 
-function test_variational(process::Langevin = Triplewell(); hidden=[10,10], samples=100, plotevery=10, epochs=10)
+function test_variational(process::Langevin = Langevin(triplewell, RadialExp([1.,0],[-1.,0], -5.), triplewellbox, 1); hidden=[10,10], samples=100, plotevery=10, epochs=10)
     model = NN.mlp(hidden)
     c = CommittorVariational(process)
     data = randuniform(process)
     train(model, c, data, bounds=process.box, plotevery=plotevery, batch=samples, epochs=epochs)
 end
 
+import Zygote: @nograd
 
 function train(model, c, data;
     epochs=1,
     batch=1000,
     bounds=[],
-    opt = ADAM(0.01),
+    opt = ADAM(.01),
     plotevery=1
     )
 
     ps = Flux.params(model)
     losshist = []
+    alphas   = []
+    metaopt = Descent(0.1)
 
     for i in 1:epochs
         for x in Flux.Data.DataLoader(data, batchsize=batch)
             local pointlosses
 
             l, pb = Flux.pullback(ps) do
+                #@show sum(x)
                 pointlosses = losses(c, model, x)
                 #sum(pointlosses)
                 sum(abs2, pointlosses) / size(x, 2)
             end
+            #@show sum(x)
+            #pointlosses = losses(c, model, x)
+            #@show sum(pointlosses)
+            #@show size(pointlosses)
+            #xs, ys, grid = boxgrid(bounds)
+            #Plots.scatter(grid[1,:], grid[2,:], ms = pointlosses' ./ maximum(pointlosses)) |> display
             push!(losshist, l)
-            println(l)
             grad = pb(1)
-            Flux.Optimise.update!(opt, ps, grad)
+
+            alpha = metalearn(losshist, alphas, 10, metaopt)
+            push!(alphas, alpha)
+            metaopt = Flux.Optimiser(opt, Descent(alpha))
+
+            println("l $l a $alpha")
+            Flux.Optimise.update!(metaopt, ps, grad)
 
             fm = boundaryfixture(c.boundary, model)
             if length(losshist) % plotevery == 0
@@ -326,7 +446,30 @@ function train(model, c, data;
             end
         end
     end
-    model
+    model, losshist, alphas
+end
+
+
+
+function metalearn(losses, alphas, age, opt)
+    n = min(age, length(losses), length(alphas))
+    if n == 0
+        return 1/2
+    elseif  n == 1
+        return 1.
+    else
+        learnrate_fd = losses[end-n+1:end] - losses[end-n:end-1]
+        alphas = alphas[end-n+1:end]
+        X = ones(n, 2)
+        X[:, 1] = alphas
+        coeff = X \ learnrate_fd
+        stochgrad = coeff
+        slope = coeff[1]
+        @show g = [slope]
+        alpha = [alphas[end]]
+        Flux.Optimise.update!(opt,alpha, g)
+        alpha[1] * (1 + (rand()/100))
+    end
 end
 
 function visualize(model, bounds, pointlosses, x, losshist)
@@ -455,3 +598,5 @@ hyperwell(x) = 0.1*sum((x.^2 .-1).^2, dims=1)
 
 
 end # module
+
+using Main.NN
