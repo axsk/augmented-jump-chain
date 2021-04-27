@@ -50,7 +50,7 @@ function plot(m, bounds, nx=40, ny=30)
 
     zs = reshape(m(zs), length(xs), length(ys))'
     heatmap(xs, ys, zs)
-    contour!(xs, ys, zs, linewidth=2), grid
+    contour!(xs, ys, zs, linewidth=2)
 end
 
 ### Boundary Types
@@ -433,7 +433,8 @@ function train(model, c, data;
             push!(losshist, l)
             grad = pb(1)
 
-            alpha = metalearn(losshist, alphas, 10, metaopt)
+            #alpha = metalearn(losshist, alphas, 10, metaopt)
+            alpha = 1
             push!(alphas, alpha)
             metaopt = Flux.Optimiser(opt, Descent(alpha))
 
