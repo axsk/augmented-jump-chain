@@ -76,3 +76,27 @@ function quadraticmin(x,y)
     plot!(p) |> display
     roots(derivative(p))[1]
 end
+
+
+# first attempt at metalearning from `age` previous alphas and losses
+
+function metalearn(losses, alphas, age, opt=Descent(1))
+    n = min(age, length(losses), length(alphas))
+    if n == 0
+        return 1/2
+    elseif  n == 1
+        return 1.
+    else
+        learnrate_fd = losses[end-n+1:end] - losses[end-n:end-1]
+        alphas = alphas[end-n+1:end]
+        X = ones(n, 2)
+        X[:, 1] = alphas
+        coeff = X \ learnrate_fd
+        stochgrad = coeff
+        slope = coeff[1]
+        @show g = [slope]
+        alpha = [alphas[end]]
+        Flux.Optimise.update!(opt,alpha, g)
+        alpha[1] * (1 + (rand()/100))
+    end
+end
