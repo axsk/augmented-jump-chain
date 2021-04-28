@@ -144,3 +144,9 @@ function heatmap(m::Chain)
     d = [m([x,y])[1] for x in 0:.1:1, y in 0:.1:1]
     heatmap(d)
 end
+
+# ------- lets tackle the tripplewell ------- #
+
+include("neurcomm.jl")
+
+data = NN.sampletrajectories(NN.Triplewell(), 100, 10, dt = 0.01, steps=10)

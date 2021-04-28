@@ -271,15 +271,19 @@ sample(t::Langevin, n) = randbox(t.box, n)
 randdata(t::Langevin, branches, dt, steps) = RandomData(n->sampletrajectories(t, n, branches, dt=dt, steps=steps))
 randuniform(t::Langevin) = RandomData(n->sample(t, n))
 
-function sampletrajectories(t::Langevin, n, m; dt=1, steps=1)
+""" batch sampling of trajectories for the process `t`.
+At each of the `n` sampled start points compute `branches` trajectories,
+with step-size `dt` and `steps` steps.
+returns an `N` x (`steps`+1) x `n` array, where `N` is the states space dimension"""
+function sampletrajectories(t::Langevin, n, branches; dt=1, steps=1)
     xs = sample(t, n)
     u = potential(t)
     sigma = sqrt(2/t.beta)
-    data = zeros(2, m+1, n)
+    data = zeros(2, branches+1, n)
     for i in 1:n
         x = xs[:,i]
         data[:, 1, i] = x
-        for j in 1:m
+        for j in 1:branches
             data[:, 1+j, i] = eulermaruyama(x, u, sigma, dt, steps)
         end
     end
