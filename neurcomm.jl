@@ -263,9 +263,6 @@ end
 CommittorVariational(L::Langevin) = CommittorVariational(L.boundary, x -> exp.(-L.beta * L.potential(x)))
 CommittorSampled(L::Langevin) = CommittorSampled(L.boundary)
 
-# dirty workaround
-CommittorSQRA(h::Number) = L::Langevin -> CommittorSQRA(L.potential, h, L.beta, L.boundary)
-
 
 potential(p::Langevin) = p.potential
 box(t::Langevin) = t.box
@@ -292,9 +289,9 @@ end
 
 
 
-function test_sqra(;hidden=[10,10], h=.1, beta=5., r=.1, samples=100, plotevery=10, epochs=1000)
+function test_sqra(p::Langevin = Triplewell(); hidden=[10,10], h=.1, r=.1, samples=100, plotevery=10, epochs=1000)
     model = NN.mlp(hidden)
-    c = CommittorSQRA(triplewell, h, beta, RadialCrisp([1,0],[-1,0], r))
+    c = CommittorSQRA(p.potential, h, p.beta, RadialCrisp([1,0],[-1,0], r))
     #data = randbox(triplewellbox, samples)
     data = RandomData(n->randbox(triplewellbox, n))#sampletrajectories(t, n, branches, dt=dt, steps=steps))
     train(model, c, data, bounds=triplewellbox, plotevery=plotevery, batch=samples, epochs=epochs)
@@ -319,7 +316,7 @@ function train(model, c, data;
     epochs=1,
     batch=1000,
     bounds=[],
-    opt = ADAM(0.01),
+    opt = ADAM(0.001),
     plotevery=1
     )
 
@@ -425,7 +422,7 @@ mullerbrown(x, y) = mullerbrown([x,y])
 
 ## Triplewell
 
-Triplewell() = Langevin(triplewell, RadialCrisp([1.,0],[-1.,0], .1), triplewellbox, .1)
+Triplewell(beta=2.) = Langevin(triplewell, RadialCrisp([1.,0],[-1.,0], .1), triplewellbox, beta)
 
 const triplewellbox = [-3. 3; -2 2]
 

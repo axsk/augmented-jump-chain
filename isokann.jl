@@ -1,9 +1,11 @@
 using Flux
 using Flux.Optimise: update!
+using Statistics
+using Plots
 
-" multi-layer perceptron with sigmoid activation function, 
+" multi-layer perceptron with sigmoid activation function,
 `x` is an array with the widths of the hidden layers,
-`in` denotes the input dimension and 
+`in` denotes the input dimension and
 `sig` enables/disables sigmoid on last layer"
 function mlp(x=[2,2], in=2, sig=false)
     first = Dense(in, x[1], σ)
@@ -54,7 +56,7 @@ function fixedpointiterate!(model, data, opt)
     ys = data[:, 2:end, :]
     loss, back = Zygote.pullback(ps) do
         k = model(data)
-        diff = (shiftscale(mean(k, dims=1)) |> vec) - k[1,:] 
+        diff = (shiftscale(mean(k, dims=1)) |> vec) - k[1,:]
         mean(abs2, diff)
     end
     grad = back(one(loss))
@@ -62,6 +64,7 @@ function fixedpointiterate!(model, data, opt)
     loss
 end
 
+#=
 struct RandomBatch
     data
     batchsize
@@ -69,6 +72,7 @@ struct RandomBatch
 end
 
 Base.start(b::RandomBatch)
+=#
 
 function isokann(;model=mlp(), data=diffusivedata(), iter=100, poweriter=10, opt=Nesterov(0.1))
     ls = [fixedpointloss(model, data)]
@@ -91,23 +95,12 @@ function fpnn(;model=mlp(), data=diffusivedata(), iter=100, opt=Nesterov(0.1))
     model, ls
 end
 
-function compare(;repeats=10, kwargs...)
+function compareopt(;alg=isokann, repeats=20, kwargs...)
     d = Dict()
-    for i in 1:10
-        for (name, opt) in [("ADAM 1",ADAM(1)),("ADAM 0.1",ADAM(0.1)),("ADAM 0.01",ADAM(0.01)),
-                            ("Nesterov 1",Nesterov(1)),("Nesterov 0.1",Nesterov(0.1)),("Nesterov 0.01",Nesterov(0.01))]
-            push!(get!(d, name, []), isokann(opt=opt; kwargs...)[2])
-        end
-    end
-    d
-end
-
-function compareopt(;alg=isokann, kwargs...)
-    d = Dict()
-     for i in 1:10
+     for i in 1:repeats
          for (name, opt) in [("ADAM 1",ADAM(1)),("ADAM 0.1",ADAM(0.1)),("ADAM 0.01",ADAM(0.01)),
                              ("Nesterov 1",Nesterov(1)),("Nesterov 0.1",Nesterov(0.1)),("Nesterov 0.01",Nesterov(0.01))]
-             push!(get!(d, name, []), alg(opt=opt; kwargs...)[2])
+             push!(get!(d, name, []), alg(opt=opt; kwargs...))
          end
      end
      compareplot(d) |> display
@@ -118,6 +111,7 @@ function compareopt(;alg=isokann, kwargs...)
 function compareplot(d)
     plot()
     for (k,v) in d
+        v = map(v->v[2], v)
         loss = median(reduce(hcat,v), dims=2) |> vec
         plot!(loss, yaxis=:log, label=k, ylims = (minimum(loss),10 * loss[1,1]))
     end
@@ -140,7 +134,7 @@ end
 
 function diffusivedata(n=100, m=10)
     xs = rand(2,1,n)
-    ys = randn(2,m,n) / 10 .+ xs 
+    ys = randn(2,m,n) / 10 .+ xs
     hcat(xs, ys)
 end
 
@@ -150,4 +144,3 @@ function heatmap(m::Chain)
     d = [m([x,y])[1] for x in 0:.1:1, y in 0:.1:1]
     heatmap(d)
 end
-
