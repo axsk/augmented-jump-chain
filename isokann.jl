@@ -74,13 +74,14 @@ end
 Base.start(b::RandomBatch)
 =#
 
-function isokann(;model=mlp(), data=diffusivedata(), iter=100, poweriter=10, opt=Nesterov(0.1))
+function isokann(;model=mlp(), data=diffusivedata(), iter=100, poweriter=10, opt=Nesterov(0.1), cb=(model, loss)->nothing)
     ls = [fixedpointloss(model, data)]
     for i in 1:poweriter
         koop = deepcopy(model)
         for j in 1:iter
             loss = poweriterate!(model, koop, data, opt)
             push!(ls, loss)
+            cb(model, ls)
         end
     end
     model, ls
