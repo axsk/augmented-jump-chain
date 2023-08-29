@@ -1,9 +1,7 @@
-# birthdeath
+# augmented-jump-chain
+## (former name `birthdeath`)
 
-WIP from 07.20 to 06.21
-
-Continuation of https://github.com/axsk/generators and in a similar dirty state
-Most usefull ideas where ported to ttps://github.com/axsk/Sqra.jl
+Amongst the rest, most prominently features the code for the [The Augmented Jump Chain](https://doi.org/10.1002/adts.202000274)
 
 ## Contents
 ### Part 1 (python)
@@ -22,3 +20,9 @@ Most usefull ideas where ported to ttps://github.com/axsk/Sqra.jl
 - voronoi neighborhood by linear program of H. Lie
 - meta SGD
 - adaptive euler maruyama
+
+# History
+WIP from 07.20 to 06.21
+
+Continuation of https://github.com/axsk/generators and in a similar dirty state
+Most usefull ideas where ported to ttps://github.com/axsk/Sqra.jl
